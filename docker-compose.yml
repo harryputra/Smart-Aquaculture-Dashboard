@@ -1,0 +1,158 @@
+version: '3.8'
+
+services:
+  # ============================
+  # MQTT Broker - Mosquitto
+  # ============================
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: aquaculture_mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+    networks:
+      - aquaculture_net
+
+  # ============================
+  # InfluxDB - Time Series Database
+  # ============================
+  influxdb:
+    image: influxdb:2.7
+    container_name: aquaculture_influxdb
+    restart: unless-stopped
+    ports:
+      - "8086:8086"
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=admin
+      - DOCKER_INFLUXDB_INIT_PASSWORD=admin123456
+      - DOCKER_INFLUXDB_INIT_ORG=aquaculture
+      - DOCKER_INFLUXDB_INIT_BUCKET=sensor_data
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=my-super-secret-auth-token
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+      - influxdb_config:/etc/influxdb2
+    networks:
+      - aquaculture_net
+
+  # ============================
+  # PostgreSQL - Relational Database
+  # ============================
+  postgres:
+    image: postgres:15
+    container_name: aquaculture_postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=aquaculture
+      - POSTGRES_PASSWORD=aquaculture123
+      - POSTGRES_DB=aquaculture
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - aquaculture_net
+
+  # ============================
+  # Telegraf - Data Collector
+  # ============================
+  telegraf:
+    image: telegraf:1.28
+    container_name: aquaculture_telegraf
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+      - influxdb
+      - postgres
+    volumes:
+      - ./telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
+    networks:
+      - aquaculture_net
+
+  # ============================
+  # Grafana - Visualization
+  # ============================
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: aquaculture_grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_INSTALL_PLUGINS=grafana-clock-panel
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_AUTH_DISABLE_LOGIN_FORM=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      - influxdb
+    networks:
+      - aquaculture_net
+
+  # ============================
+  # Backend API - Node.js
+  # ============================
+  backend:
+    build: ./backend
+    container_name: aquaculture_backend
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=aquaculture
+      - DB_PASSWORD=aquaculture123
+      - DB_NAME=aquaculture
+      - MQTT_HOST=mosquitto
+      - MQTT_PORT=1883
+      - MQTT_USER=aquaculture
+      - MQTT_PASSWORD=aquaculture123
+      - INFLUX_URL=http://influxdb:8086
+      - INFLUX_TOKEN=my-super-secret-auth-token
+      - INFLUX_ORG=aquaculture
+      - INFLUX_BUCKET=sensor_data
+    depends_on:
+      - postgres
+      - mosquitto
+      - influxdb
+    networks:
+      - aquaculture_net
+
+  # ============================
+  # Frontend - React
+  # ============================
+  frontend:
+    build: ./frontend
+    container_name: aquaculture_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - aquaculture_net
+
+networks:
+  aquaculture_net:
+    driver: bridge
+
+volumes:
+  influxdb_data:
+  influxdb_config:
+  postgres_data:
+  grafana_data:

@@ -1,0 +1,495 @@
+// ============================
+// Lele Feeder V3.2 - Hybrid Dual Control
+// Sesuai firmware esp32_pakan_lele_v3_2.ino
+// ============================
+
+function registerLeleHandlers({ app, pool, mqttClient }) {
+  mqttClient.subscribe('lele/device/status');
+  mqttClient.subscribe('lele/biomass/sample');
+  mqttClient.subscribe('lele/biomass/summary');
+  mqttClient.subscribe('lele/feed/session');
+  mqttClient.subscribe('lele/feed/batch');
+  mqttClient.subscribe('lele/feed/summary');
+  mqttClient.subscribe('lele/device/error');
+  mqttClient.subscribe('lele/device/ack');
+
+  console.log('✓ Lele V3.2 MQTT handlers subscribed');
+
+  const ackCache = {};
+  const liveDataCache = {};
+
+  mqttClient.on('message', async (topic, message) => {
+    if (!topic.startsWith('lele/')) return;
+    try {
+      const payload = JSON.parse(message.toString());
+      const deviceId = payload.device_id || 'unknown';
+      const pondR = await pool.query(`SELECT pond_id FROM lele_devices WHERE device_id = $1`, [deviceId]);
+      const pondId = pondR.rows[0]?.pond_id || null;
+
+      if (topic === 'lele/device/status') {
+        liveDataCache[deviceId] = { ...payload, received_at: new Date() };
+
+        await pool.query(`
+          INSERT INTO lele_devices (
+            device_id, is_online, wifi_connected, mqtt_connected, rtc_ok,
+            auto_feed_enabled, feeding_in_progress, current_screen,
+            hx_chamber_ok, hx_sampling_ok, fish_count, sample_ready, avg_fish_g,
+            seconds_to_next_feed, last_seen,
+            feeding_rate_percent, feeding_per_day, target_sample_count,
+            saved_sample_count, current_sample_index, chamber_g, sampling_g,
+            servo_angle, stepper_enabled, spinner_state, next_schedule_hhmm,
+            last_feed_success, last_feed_target_g, last_feed_actual_g,
+            last_feed_batch_count, last_feed_time,
+            last_error_code, last_error_msg, last_error_time
+          ) VALUES ($1, TRUE, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(),
+            $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32)
+          ON CONFLICT (device_id) DO UPDATE SET
+            is_online = TRUE,
+            wifi_connected = EXCLUDED.wifi_connected,
+            mqtt_connected = EXCLUDED.mqtt_connected,
+            rtc_ok = EXCLUDED.rtc_ok,
+            auto_feed_enabled = EXCLUDED.auto_feed_enabled,
+            feeding_in_progress = EXCLUDED.feeding_in_progress,
+            current_screen = EXCLUDED.current_screen,
+            hx_chamber_ok = EXCLUDED.hx_chamber_ok,
+            hx_sampling_ok = EXCLUDED.hx_sampling_ok,
+            fish_count = EXCLUDED.fish_count,
+            sample_ready = EXCLUDED.sample_ready,
+            avg_fish_g = EXCLUDED.avg_fish_g,
+            seconds_to_next_feed = EXCLUDED.seconds_to_next_feed,
+            last_seen = NOW(),
+            feeding_rate_percent = EXCLUDED.feeding_rate_percent,
+            feeding_per_day = EXCLUDED.feeding_per_day,
+            target_sample_count = EXCLUDED.target_sample_count,
+            saved_sample_count = EXCLUDED.saved_sample_count,
+            current_sample_index = EXCLUDED.current_sample_index,
+            chamber_g = EXCLUDED.chamber_g,
+            sampling_g = EXCLUDED.sampling_g,
+            servo_angle = EXCLUDED.servo_angle,
+            stepper_enabled = EXCLUDED.stepper_enabled,
+            spinner_state = EXCLUDED.spinner_state,
+            next_schedule_hhmm = EXCLUDED.next_schedule_hhmm,
+            last_feed_success = EXCLUDED.last_feed_success,
+            last_feed_target_g = EXCLUDED.last_feed_target_g,
+            last_feed_actual_g = EXCLUDED.last_feed_actual_g,
+            last_feed_batch_count = EXCLUDED.last_feed_batch_count,
+            last_feed_time = EXCLUDED.last_feed_time,
+            last_error_code = EXCLUDED.last_error_code,
+            last_error_msg = EXCLUDED.last_error_msg,
+            last_error_time = EXCLUDED.last_error_time
+        `, [
+          deviceId,
+          payload.wifi_connected || false,
+          payload.mqtt_connected || false,
+          payload.rtc_ok || false,
+          payload.auto_feed_enabled || false,
+          payload.feeding_in_progress || false,
+          payload.screen || '',
+          payload.hx_chamber_ok || false,
+          payload.hx_sampling_ok || false,
+          payload.fish_count || 0,
+          payload.sample_ready || false,
+          payload.avg_fish_g || 0,
+          payload.seconds_to_next_feed != null ? payload.seconds_to_next_feed : -1,
+          payload.feeding_rate_percent || 0,
+          payload.feeding_per_day || 2,
+          payload.target_sample_count || 10,
+          payload.saved_sample_count || 0,
+          payload.current_sample_index || 0,
+          payload.chamber_g || 0,
+          payload.sampling_g || 0,
+          payload.servo_angle || 0,
+          payload.stepper_enabled || false,
+          payload.spinner_state || 0,
+          payload.next_schedule_hhmm || '',
+          payload.last_feed_success || false,
+          payload.last_feed_target_g || 0,
+          payload.last_feed_actual_g || 0,
+          payload.last_feed_batch_count || 0,
+          payload.last_feed_time || '-',
+          payload.last_error_code || 'NONE',
+          payload.last_error_msg || '',
+          payload.last_error_time || '-',
+        ]);
+
+        // Sync schedules array
+        if (Array.isArray(payload.schedules)) {
+          for (const sch of payload.schedules) {
+            await pool.query(
+              `INSERT INTO lele_device_schedules (device_id, schedule_index, hour, minute, enabled, last_synced)
+               VALUES ($1, $2, $3, $4, $5, NOW())
+               ON CONFLICT (device_id, schedule_index) DO UPDATE SET
+                 hour = EXCLUDED.hour, minute = EXCLUDED.minute,
+                 enabled = EXCLUDED.enabled, last_synced = NOW()`,
+              [deviceId, sch.index, sch.hour, sch.minute, sch.enabled]
+            );
+          }
+        }
+      }
+
+      else if (topic === 'lele/biomass/sample') {
+        await pool.query(
+          `INSERT INTO lele_biomass_samples (device_id, pond_id, fish_no, fish_weight_g, sampled_at)
+           VALUES ($1, $2, $3, $4, NOW())`,
+          [deviceId, pondId, payload.fish_no, payload.fish_weight_g]
+        );
+      }
+
+      else if (topic === 'lele/biomass/summary') {
+        await pool.query(
+          `INSERT INTO lele_biomass_summary (
+            device_id, pond_id, sample_count, average_fish_weight_g, fish_count,
+            estimated_biomass_kg, feeding_rate_percent, feeding_per_day,
+            estimated_daily_feed_g, estimated_feed_per_schedule_g
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [
+            deviceId, pondId,
+            payload.sample_count, payload.average_fish_weight_g, payload.fish_count,
+            payload.estimated_biomass_kg, payload.feeding_rate_percent, payload.feeding_per_day,
+            payload.estimated_daily_feed_g, payload.estimated_feed_per_schedule_g,
+          ]
+        );
+        if (pondId && payload.fish_count) {
+          await pool.query(`UPDATE ponds SET fish_count = $1 WHERE pond_id = $2`, [payload.fish_count, pondId]);
+        }
+        await pool.query(
+          `INSERT INTO notifications (pond_id, type, category, title, message)
+           VALUES ($1, 'success', 'feeding', $2, $3)`,
+          [pondId, 'Biomassa Dihitung',
+           `Avg ${payload.average_fish_weight_g}g × ${payload.fish_count} = ${payload.estimated_biomass_kg} kg`]
+        );
+      }
+
+      else if (topic === 'lele/feed/session' && payload.event === 'start') {
+        await pool.query(
+          `INSERT INTO lele_feed_sessions (
+            feed_session_id, device_id, pond_id, session_name,
+            target_total_g, planned_batch_count, max_batch_g, started_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+          ON CONFLICT (feed_session_id) DO NOTHING`,
+          [payload.feed_session_id, deviceId, pondId, payload.session_name,
+           payload.target_total_g, payload.planned_batch_count, payload.max_batch_g]
+        );
+        await pool.query(
+          `INSERT INTO notifications (pond_id, type, category, title, message)
+           VALUES ($1, 'info', 'feeding', $2, $3)`,
+          [pondId, '🍽️ Sesi Pakan Dimulai',
+           `${payload.session_name} - target ${payload.target_total_g}g`]
+        );
+      }
+
+      else if (topic === 'lele/feed/batch') {
+        await pool.query(
+          `INSERT INTO lele_feed_batches (
+            feed_session_id, device_id, batch_no, total_batches,
+            target_g, actual_g, spinner_direction, success
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [payload.feed_session_id, deviceId, payload.batch_no, payload.total_batches,
+           payload.target_g, payload.actual_g, payload.spinner_direction, payload.success]
+        );
+      }
+
+      else if (topic === 'lele/feed/summary') {
+        await pool.query(
+          `UPDATE lele_feed_sessions SET
+            actual_total_g = $1, actual_batch_count = $2, success = $3, completed_at = NOW()
+           WHERE feed_session_id = $4`,
+          [payload.actual_total_g, payload.batch_count, payload.success, payload.feed_session_id]
+        );
+        if (pondId) {
+          await pool.query(
+            `INSERT INTO feeding_logs (pond_id, feed_amount_kg, feed_type, triggered_by, note)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [pondId, (payload.actual_total_g || 0) / 1000, 'Pelet Lele',
+             payload.session_name?.includes('AUTO') ? 'schedule' :
+             payload.session_name?.includes('WEB') ? 'remote' : 'manual',
+             `${payload.session_name} - ${payload.batch_count} batch`]
+          );
+        }
+        await pool.query(
+          `INSERT INTO notifications (pond_id, type, category, title, message)
+           VALUES ($1, $2, 'feeding', $3, $4)`,
+          [pondId, payload.success ? 'success' : 'critical',
+           payload.success ? '✅ Sesi Pakan Selesai' : '❌ Sesi Pakan Gagal',
+           `${payload.session_name}: ${payload.actual_total_g}g dalam ${payload.batch_count} batch`]
+        );
+      }
+
+      else if (topic === 'lele/device/error') {
+        await pool.query(
+          `INSERT INTO lele_errors (device_id, pond_id, code, message) VALUES ($1, $2, $3, $4)`,
+          [deviceId, pondId, payload.code, payload.message]
+        );
+        await pool.query(
+          `INSERT INTO notifications (pond_id, type, category, title, message)
+           VALUES ($1, 'critical', 'system', $2, $3)`,
+          [pondId, `⚠️ Error: ${payload.code}`, payload.message]
+        );
+      }
+
+      else if (topic === 'lele/device/ack') {
+        ackCache[deviceId] = {
+          command: payload.command,
+          success: payload.success,
+          reason: payload.reason,
+          timestamp: payload.timestamp,
+          received_at: new Date(),
+        };
+        console.log(`[ACK] ${deviceId}: ${payload.command} = ${payload.success ? '✓' : '✗'} (${payload.reason})`);
+      }
+    } catch (e) {
+      console.error('Lele MQTT handler error:', e.message);
+    }
+  });
+
+  // Mark offline after 30s tanpa status
+  setInterval(async () => {
+    try {
+      await pool.query(
+        `UPDATE lele_devices SET is_online = FALSE
+         WHERE is_online = TRUE AND last_seen < NOW() - INTERVAL '30 seconds'`
+      );
+    } catch (e) { /* */ }
+  }, 15000);
+
+  function sendCommand(deviceId, command, extra = {}) {
+    const topic = `lele/device/${deviceId}/command`;
+    const payload = { command, source: 'dashboard', timestamp: Date.now(), ...extra };
+    mqttClient.publish(topic, JSON.stringify(payload));
+    console.log(`📤 CMD → ${topic}: ${command}`);
+  }
+
+  function sendConfig(deviceId, config) {
+    const topic = `lele/device/${deviceId}/config`;
+    mqttClient.publish(topic, JSON.stringify(config));
+    console.log(`📤 CONFIG → ${topic}`);
+  }
+
+  // ============================
+  // REST API
+  // ============================
+  app.get('/api/lele/devices', async (req, res) => {
+    try {
+      const r = await pool.query(`
+        SELECT d.*, p.name as pond_name, p.fish_type
+        FROM lele_devices d
+        LEFT JOIN ponds p ON d.pond_id = p.pond_id
+        ORDER BY d.created_at DESC`);
+      const rows = r.rows.map(d => ({
+        ...d,
+        live_data: liveDataCache[d.device_id] || null,
+      }));
+      res.json(rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get('/api/lele/devices/:deviceId', async (req, res) => {
+    try {
+      const r = await pool.query(`
+        SELECT d.*, p.name as pond_name, p.fish_type
+        FROM lele_devices d
+        LEFT JOIN ponds p ON d.pond_id = p.pond_id
+        WHERE d.device_id = $1`, [req.params.deviceId]);
+      if (!r.rows.length) return res.status(404).json(null);
+      res.json({ ...r.rows[0], live_data: liveDataCache[req.params.deviceId] || null });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.put('/api/lele/devices/:deviceId/assign', async (req, res) => {
+    try {
+      const { pond_id, name } = req.body;
+      const r = await pool.query(
+        `UPDATE lele_devices SET pond_id = $1, name = COALESCE($2, name) WHERE device_id = $3 RETURNING *`,
+        [pond_id, name, req.params.deviceId]
+      );
+      res.json(r.rows[0]);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ============================
+  // REMOTE CONTROL
+  // ============================
+  app.post('/api/lele/devices/:deviceId/control/manual-feed', async (req, res) => {
+    try {
+      sendCommand(req.params.deviceId, 'manual_feed_adaptive');
+      res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/lele/devices/:deviceId/control/feed-gram', async (req, res) => {
+    try {
+      const { target_g } = req.body;
+      if (!target_g || target_g < 10 || target_g > 5000) {
+        return res.status(400).json({ error: 'target_g harus 10-5000' });
+      }
+      sendCommand(req.params.deviceId, 'manual_feed_gram', { target_g });
+      res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/lele/devices/:deviceId/control/auto-feed', async (req, res) => {
+    try {
+      const { enabled } = req.body;
+      sendCommand(req.params.deviceId, 'set_auto_feed', { enabled });
+      res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/lele/devices/:deviceId/control/tare', async (req, res) => {
+    try {
+      const { scale_type } = req.body;
+      sendCommand(req.params.deviceId, 'tare', { scale_type });
+      await pool.query(
+        `INSERT INTO lele_tare_history (device_id, scale_type, triggered_by) VALUES ($1, $2, 'dashboard')`,
+        [req.params.deviceId, scale_type]
+      );
+      res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/lele/devices/:deviceId/control/reset-samples', async (req, res) => {
+    try { sendCommand(req.params.deviceId, 'reset_samples'); res.json({ success: true }); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/lele/devices/:deviceId/control/start-sampling', async (req, res) => {
+    try { sendCommand(req.params.deviceId, 'start_sampling'); res.json({ success: true }); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/lele/devices/:deviceId/control/auto-gen-schedule', async (req, res) => {
+    try { sendCommand(req.params.deviceId, 'auto_gen_schedule'); res.json({ success: true }); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/lele/devices/:deviceId/control/valve', async (req, res) => {
+    try {
+      const { action } = req.body;
+      sendCommand(req.params.deviceId, action === 'open' ? 'open_valve' : 'close_valve');
+      res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/lele/devices/:deviceId/control/button', async (req, res) => {
+    try {
+      const { button } = req.body;
+      if (!['up', 'down', 'ok', 'back'].includes(button)) {
+        return res.status(400).json({ error: 'button harus up/down/ok/back' });
+      }
+      sendCommand(req.params.deviceId, 'btn', { button });
+      res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Update config via MQTT (langsung ke ESP32)
+  app.put('/api/lele/devices/:deviceId/config-mqtt', async (req, res) => {
+    try {
+      const { fish_count, feeding_per_day, target_sample_count } = req.body;
+      const config = {};
+      if (fish_count != null) config.fish_count = +fish_count;
+      if (feeding_per_day != null) config.feeding_per_day = +feeding_per_day;
+      if (target_sample_count != null) config.target_sample_count = +target_sample_count;
+      sendConfig(req.params.deviceId, config);
+      res.json({ success: true, message: 'Config dikirim ke device' });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Update jadwal individual
+  app.put('/api/lele/devices/:deviceId/schedule/:idx', async (req, res) => {
+    try {
+      const idx = parseInt(req.params.idx);
+      const { hour, minute, enabled } = req.body;
+      const config = { schedule_index: idx };
+      if (hour != null) config.hour = +hour;
+      if (minute != null) config.minute = +minute;
+      if (enabled != null) config.enabled = !!enabled;
+      sendConfig(req.params.deviceId, config);
+      res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get('/api/lele/devices/:deviceId/last-ack', async (req, res) => {
+    res.json(ackCache[req.params.deviceId] || null);
+  });
+
+  app.get('/api/lele/devices/:deviceId/schedules-synced', async (req, res) => {
+    try {
+      const r = await pool.query(
+        `SELECT * FROM lele_device_schedules WHERE device_id = $1 ORDER BY schedule_index`,
+        [req.params.deviceId]
+      );
+      res.json(r.rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ============================
+  // DATA QUERIES
+  // ============================
+  app.get('/api/lele/devices/:deviceId/biomass-samples', async (req, res) => {
+    try {
+      const r = await pool.query(
+        `SELECT * FROM lele_biomass_samples WHERE device_id = $1 ORDER BY sampled_at DESC LIMIT 100`,
+        [req.params.deviceId]
+      );
+      res.json(r.rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get('/api/lele/devices/:deviceId/biomass-summary', async (req, res) => {
+    try {
+      const r = await pool.query(
+        `SELECT * FROM lele_biomass_summary WHERE device_id = $1 ORDER BY summarized_at DESC LIMIT 20`,
+        [req.params.deviceId]
+      );
+      res.json(r.rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get('/api/lele/devices/:deviceId/growth', async (req, res) => {
+    try {
+      const r = await pool.query(
+        `SELECT summarized_at as recorded_at, average_fish_weight_g, estimated_biomass_kg, fish_count
+         FROM lele_biomass_summary WHERE device_id = $1 ORDER BY summarized_at DESC LIMIT 30`,
+        [req.params.deviceId]
+      );
+      res.json(r.rows.reverse());
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get('/api/lele/devices/:deviceId/sessions', async (req, res) => {
+    try {
+      const r = await pool.query(
+        `SELECT s.*,
+          (SELECT json_agg(b.*) FROM lele_feed_batches b WHERE b.feed_session_id = s.feed_session_id) as batches
+         FROM lele_feed_sessions s
+         WHERE s.device_id = $1 ORDER BY s.started_at DESC LIMIT 50`,
+        [req.params.deviceId]
+      );
+      res.json(r.rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get('/api/lele/devices/:deviceId/errors', async (req, res) => {
+    try {
+      const r = await pool.query(
+        `SELECT * FROM lele_errors WHERE device_id = $1 ORDER BY occurred_at DESC LIMIT 50`,
+        [req.params.deviceId]
+      );
+      res.json(r.rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get('/api/lele/devices/:deviceId/tare-history', async (req, res) => {
+    try {
+      const r = await pool.query(
+        `SELECT * FROM lele_tare_history WHERE device_id = $1 ORDER BY occurred_at DESC LIMIT 20`,
+        [req.params.deviceId]
+      );
+      res.json(r.rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  console.log('✓ Lele V3.2 API routes registered');
+}
+
+module.exports = { registerLeleHandlers };

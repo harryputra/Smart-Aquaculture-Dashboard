@@ -1,0 +1,29 @@
+apiVersion: 1
+
+datasources:
+  - name: InfluxDB
+    type: influxdb
+    access: proxy
+    url: http://influxdb:8086
+    jsonData:
+      version: Flux
+      organization: aquaculture
+      defaultBucket: sensor_data
+      tlsSkipVerify: true
+    secureJsonData:
+      token: my-super-secret-auth-token
+    isDefault: true
+    editable: true
+
+  - name: PostgreSQL
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    user: aquaculture
+    database: aquaculture
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1500
+    secureJsonData:
+      password: aquaculture123
+    editable: true
