@@ -51,6 +51,8 @@ if /i "%CMD%"=="reset"        goto :reset
 if /i "%CMD%"=="hard-reset"   goto :reset
 if /i "%CMD%"=="doctor"       goto :doctor
 if /i "%CMD%"=="mqtt-passwd"  goto :mqttpasswd
+if /i "%CMD%"=="mqtt-sub"     goto :mqttsub
+if /i "%CMD%"=="mqtt-test"    goto :mqtttest
 if /i "%CMD%"=="help"         goto :usage
 if /i "%CMD%"=="-h"           goto :usage
 if /i "%CMD%"=="--help"       goto :usage
@@ -172,6 +174,35 @@ goto :end
 call :mqttpasswd_run
 goto :end
 
+:mqttsub
+set "MU=aquaculture"
+set "MP=aquaculture123"
+if exist ".env" (
+  for /f "usebackq tokens=1,2 delims==" %%A in (".env") do (
+    if /i "%%A"=="MQTT_USER" set "MU=%%B"
+    if /i "%%A"=="MQTT_PASSWORD" set "MP=%%B"
+  )
+)
+echo [..] Subscribe semua topik MQTT (Ctrl+C untuk berhenti)...
+%DC% exec mosquitto mosquitto_sub -h localhost -p 1883 -u "!MU!" -P "!MP!" -t "#" -v
+goto :end
+
+:mqtttest
+set "MU=aquaculture"
+set "MP=aquaculture123"
+if exist ".env" (
+  for /f "usebackq tokens=1,2 delims==" %%A in (".env") do (
+    if /i "%%A"=="MQTT_USER" set "MU=%%B"
+    if /i "%%A"=="MQTT_PASSWORD" set "MP=%%B"
+  )
+)
+set "DEV=%~2"
+if "%DEV%"=="" set "DEV=pakan_lele_01"
+echo [..] Kirim status device uji !DEV! ke lele/device/status...
+%DC% exec -T mosquitto mosquitto_pub -h localhost -p 1883 -u "!MU!" -P "!MP!" -t "lele/device/status" -m "{\"device_id\":\"!DEV!\",\"wifi_connected\":true,\"mqtt_connected\":true,\"rtc_ok\":true,\"fish_count\":1000,\"avg_fish_g\":120,\"feeding_per_day\":2,\"seconds_to_next_feed\":3600,\"next_schedule_hhmm\":\"08:00\"}"
+echo [OK] Terkirim. Cek: curl http://localhost:3000/api/lele/devices
+goto :end
+
 :mqttpasswd_run
 set "MU=aquaculture"
 set "MP=aquaculture123"
@@ -200,6 +231,8 @@ echo     logs [svc]      Ikuti log
 echo     reset           HAPUS semua data (volume)
 echo     doctor          Diagnosa prasyarat
 echo     mqtt-passwd     (Re)generate mosquitto passwd dari .env
+echo     mqtt-sub        Intip semua pesan MQTT masuk
+echo     mqtt-test [id]  Kirim status device palsu (uji tanpa hardware)
 echo     help            Bantuan ini
 echo.
 goto :end

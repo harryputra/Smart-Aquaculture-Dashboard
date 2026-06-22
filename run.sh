@@ -126,6 +126,28 @@ mqtt_passwd() {
   ok "passwd MQTT diperbarui. Restart broker bila sedang berjalan: ./run.sh restart"
 }
 
+# ---------- alat bantu MQTT (debug konektivitas) ----------
+# Intip semua pesan yang masuk ke broker (Ctrl+C untuk berhenti).
+mqtt_sub() {
+  need_docker; load_env
+  log "Subscribe SEMUA topik di broker (Ctrl+C untuk berhenti)..."
+  dc exec mosquitto mosquitto_sub -h localhost -p 1883 \
+    -u "${MQTT_USER:-aquaculture}" -P "${MQTT_PASSWORD:-aquaculture123}" -t '#' -v
+}
+# Kirim status device PALSU untuk menguji pipeline (broker→backend→DB→dashboard)
+# tanpa hardware. Pakai: ./run.sh mqtt-test [device_id]
+mqtt_test() {
+  need_docker; load_env
+  local dev="${1:-pakan_lele_01}"
+  local payload="{\"device_id\":\"$dev\",\"wifi_connected\":true,\"mqtt_connected\":true,\"rtc_ok\":true,\"fish_count\":1000,\"avg_fish_g\":120,\"feeding_per_day\":2,\"seconds_to_next_feed\":3600,\"next_schedule_hhmm\":\"08:00\"}"
+  log "Kirim status device uji '${dev}' → topik lele/device/status ..."
+  dc exec -T mosquitto mosquitto_pub -h localhost -p 1883 \
+    -u "${MQTT_USER:-aquaculture}" -P "${MQTT_PASSWORD:-aquaculture123}" \
+    -t 'lele/device/status' -m "$payload"
+  ok "Terkirim. Verifikasi: ${C}curl -s http://localhost:${WEB_PORT}/api/lele/devices${N}"
+  ok "atau buka menu perangkat lele di dashboard."
+}
+
 # ---------- cek port bentrok ----------
 port_used() {
   local p="$1"
@@ -286,6 +308,8 @@ $(echo -e "${BOLD}${PROJECT} — runner${N}")
     reset           HAPUS semua data (volume) lalu bersih
     doctor          Diagnosa prasyarat & port
     mqtt-passwd     (Re)generate mosquitto passwd dari .env
+    mqtt-sub        Intip semua pesan MQTT yang masuk ke broker
+    mqtt-test [id]  Kirim status device palsu (uji pipeline tanpa hardware)
     help            Tampilkan bantuan ini
 
   ${BOLD}Server / produksi${N}  (HANYA frontend + MQTT yang di-publish ke host)
@@ -313,6 +337,8 @@ case "$cmd" in
   reset|hard-reset)   do_reset ;;
   doctor)             do_doctor ;;
   mqtt-passwd)        need_docker; mqtt_passwd ;;
+  mqtt-sub)           mqtt_sub ;;
+  mqtt-test)          shift || true; mqtt_test "${1:-}" ;;
   help|-h|--help)     usage ;;
   *) err "Perintah tidak dikenal: $cmd"; echo; usage; exit 1 ;;
 esac
