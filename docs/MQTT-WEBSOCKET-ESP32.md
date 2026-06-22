@@ -71,8 +71,12 @@ Cloudflare meng-handle WebSocket & TLS otomatis (tak perlu setting tambahan).
 ### 2c. Uji dari komputer (tanpa ESP32) — pakai MQTTX
 Install **MQTTX** (gratis, ada GUI) lalu buat koneksi:
 - **Host**: `mqtt.trin-polman.id`
-- **Protocol**: `wss`  •  **Port**: `443`  •  **Path**: `/`
-- **Username/Password**: sesuai `.env` server
+- **Protocol**: `wss`  •  **Port**: `443`
+- **Path**: `/`  ⚠️ **harus `/`, BUKAN `/mqtt`** (mosquitto menyajikan WS di root)
+- **Username**: `aquaculture` (sesuai `.env` server)
+- **Password**: nilai **asli** dari `MQTT_PASSWORD` di `.env` server — **bukan**
+  kata "PASSWORD". Cek di server: `grep MQTT_PASSWORD .env` (default `aquaculture123`).
+- **SSL/TLS**: boleh OFF (skema `wss://` sudah TLS lewat Cloudflare).
 
 Kalau "Connected" → server siap. Subscribe topik `#` untuk lihat semua pesan.
 
@@ -267,8 +271,9 @@ void loop() {
 |----------------------------|-------------------|
 | Berhenti di "WiFi connecting..." | SSID/password salah, atau WiFi 5GHz (ESP32 hanya 2.4GHz) |
 | WS connect lalu putus terus | Subprotocol salah → pastikan argumen ke-5 `beginSSL` = `"mqtt"` |
-| Connect ditolak (rc) | Username/password tidak cocok dgn `.env` server / file `passwd` |
-| WSS gagal handshake | Public Hostname Cloudflare salah (harus `localhost:9001`, Service `HTTP`) |
+| Connect ditolak / "not authorised" | Password salah. Pakai nilai ASLI `MQTT_PASSWORD` (`grep MQTT_PASSWORD .env`), bukan kata "PASSWORD". Jika `.env` diubah tapi belum `./run.sh mqtt-passwd` → hash lama, mismatch |
+| Tak konek di MQTTX, Path `/mqtt` | Ganti Path ke `/` (mosquitto WS di root) |
+| WSS gagal handshake / timeout | Port 9001 belum dipublish (belum `./run.sh deploy` versi baru), atau Public Hostname Cloudflare salah (harus Service `HTTP` → `localhost:9001`) |
 | Device tak muncul di dashboard | Cek `./run.sh mqtt-sub` di server — apakah pesan masuk? |
 | Connect tapi tiap ~100 dtk putus | Keepalive kurang → `setKeepAliveTimeout(60)` & rajin publish |
 
