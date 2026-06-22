@@ -1,0 +1,26 @@
+# ======================================================================
+# Broker MQTT mandiri (untuk VPS ber-IP publik) — Smart Aquaculture
+# Device lele di kolam jauh konek ke sini via TLS (port 8883).
+# Backend trin juga konek ke sini sebagai client (LELE_MQTT_* di app utama).
+# ======================================================================
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: aqua_mqtt_broker
+    restart: unless-stopped
+    ports:
+      - "${MQTT_PORT:-8883}:8883"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config:ro
+      - ./certs:/mosquitto/certs:ro
+      - mqtt_data:/mosquitto/data
+      - mqtt_log:/mosquitto/log
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+volumes:
+  mqtt_data:
+  mqtt_log:

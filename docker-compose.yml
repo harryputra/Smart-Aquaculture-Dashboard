@@ -179,6 +179,14 @@ services:
       - INFLUX_TOKEN=${INFLUX_TOKEN:-my-super-secret-auth-token}
       - INFLUX_ORG=${INFLUX_ORG:-aquaculture}
       - INFLUX_BUCKET=${INFLUX_BUCKET:-sensor_data}
+      # Broker remote khusus device lele (VPS via TLS). Kosongkan untuk pakai
+      # broker lokal (mosquitto) seperti biasa. Lihat .env.example & vps-broker/.
+      - LELE_MQTT_HOST=${LELE_MQTT_HOST:-}
+      - LELE_MQTT_PORT=${LELE_MQTT_PORT:-8883}
+      - LELE_MQTT_PROTOCOL=${LELE_MQTT_PROTOCOL:-mqtts}
+      - LELE_MQTT_USER=${LELE_MQTT_USER:-}
+      - LELE_MQTT_PASSWORD=${LELE_MQTT_PASSWORD:-}
+      - LELE_MQTT_TLS_INSECURE=${LELE_MQTT_TLS_INSECURE:-false}
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:5000/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
       interval: 30s

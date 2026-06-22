@@ -1,0 +1,6 @@
+# Secret & runtime — jangan di-commit
+.env
+certs/
+mosquitto/config/passwd
+mosquitto/data/
+mosquitto/log/

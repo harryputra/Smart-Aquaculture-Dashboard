@@ -1,9 +1,83 @@
 # 📡 Setup MQTT — Server & Hardware (ESP32 Pakan Lele)
 
 Panduan menghubungkan device **ESP32 feeder lele** (`esp32/esp32_pakan_lele_v3_2`)
-ke broker MQTT di server lab trin.
+ke broker MQTT.
+
+## Pilih skenario Anda
+
+| Skenario | Broker | Panduan |
+|----------|--------|---------|
+| **Kolam jauh** (beda jaringan dgn server, hanya ada WiFi internet) | Broker sendiri di **VPS + TLS** | **[Bagian A](#a-produksi-kolam-jauh-broker-vps--tls)** ⭐ produksi |
+| Kolam & server **satu LAN** (mis. uji di lab) | Mosquitto lokal di server | [Bagian B](#b-lan-kolam--server-satu-jaringan) |
+
+> Inti masalah: server trin hanya bisa diakses dari internet via **Cloudflare
+> Tunnel (HTTP/WS)** — tak ada port TCP publik untuk MQTT. Maka untuk kolam jauh,
+> broker ditaruh di **VPS ber-IP publik** (lihat folder [`vps-broker/`](../vps-broker/)).
 
 ---
+
+# A) PRODUKSI: kolam jauh (broker VPS + TLS)
+
+```
+  ESP32 (kolam, WiFi internet) ──mqtts:8883 (TLS)──►  VPS (mosquitto, IP publik)
+                                                          ▲
+  Backend trin (LELE_MQTT_*) ───mqtts:8883 (TLS)─────────┘
+                                                          ▼
+                                   Postgres → Dashboard (Cloudflare Tunnel)
+```
+
+### A.1 Siapkan broker di VPS
+Ikuti [`vps-broker/README.md`](../vps-broker/README.md): VPS kecil (1 vCPU/1 GB),
+Ubuntu 22.04/24.04, lalu `cp .env.example .env` → isi `DOMAIN` + `MQTT_PASSWORD`
+→ `./run.sh`. Disarankan `TLS_MODE=letsencrypt` dengan subdomain mis.
+`mqtt.trin-polman.id` (A record DNS-only ke IP VPS).
+
+### A.2 Sambungkan backend trin ke broker VPS
+Di `.env` app utama (root), isi blok `LELE_MQTT_*`:
+```
+LELE_MQTT_HOST=mqtt.trin-polman.id
+LELE_MQTT_PORT=8883
+LELE_MQTT_USER=aquaculture
+LELE_MQTT_PASSWORD=<password broker VPS>
+LELE_MQTT_TLS_INSECURE=false        # true hanya jika cert self-signed
+```
+Lalu `./run.sh prod-restart`. Cek log: `✓ MQTT lele (remote) terhubung`.
+(Broker lokal tetap dipakai untuk topik `aquaculture/...` — tak terpengaruh.)
+
+### A.3 Firmware ESP32 (TLS)
+Di `esp32_pakan_lele_v3_2.ino`, ubah transport ke TLS:
+```cpp
+#include <WiFiClientSecure.h>          // ◄ ganti dari <WiFiClient.h>
+#include <PubSubClient.h>
+
+WiFiClientSecure wifiClient;            // ◄ ganti dari: WiFiClient wifiClient;
+PubSubClient mqttClient(wifiClient);
+
+const bool   MQTT_ENABLE  = true;                  // ◄ aktifkan
+const char*  MQTT_SERVER  = "mqtt.trin-polman.id"; // ◄ domain broker VPS
+const uint16_t MQTT_PORT  = 8883;                  // ◄ TLS
+const char*  MQTT_USER    = "aquaculture";
+const char*  MQTT_PASSWORD= "PASSWORD_BROKER_VPS";
+
+// Di setup(), SEBELUM mqttClient.connect():
+//  - Let's Encrypt: verifikasi penuh pakai root ISRG X1
+//      wifiClient.setCACert(ISRG_ROOT_X1);   // tempel PEM root LE
+//  - Cara cepat / self-signed: enkripsi tanpa verifikasi cert
+//      wifiClient.setInsecure();
+```
+Catatan: TLS butuh RAM lebih — **ESP32 mampu**. Bila pakai **NodeMCU/ESP8266**,
+`WiFiClientSecure` versi ESP8266 (set `wifiClient.setInsecure()` atau
+`setTrustAnchors`), dan jam perangkat harus benar (NTP) agar verifikasi cert valid.
+
+> Self-signed → set `wifiClient.setInsecure()` di ESP32 **dan**
+> `LELE_MQTT_TLS_INSECURE=true` di backend. Let's Encrypt → keduanya verifikasi penuh.
+
+---
+
+# B) LAN: kolam & server satu jaringan
+
+> Hanya untuk uji di lab / kolam yang benar-benar satu LAN dengan server.
+> Untuk produksi kolam jauh, pakai **Bagian A**.
 
 ## ⚠️ Konsep penting: MQTT TIDAK lewat Cloudflare Tunnel
 

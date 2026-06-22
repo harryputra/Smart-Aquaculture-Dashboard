@@ -53,6 +53,31 @@ mqttClient.on('connect', () => {
 mqttClient.on('error', (err) => console.error('✗ MQTT error:', err));
 
 // ============================
+// MQTT khusus device Lele (broker remote, mis. VPS via TLS)
+// ----------------------------------------------------------------------
+// Device pakan lele ada di lokasi jauh (kolam) dan konek ke broker publik
+// (VPS) lewat internet+TLS. Jika LELE_MQTT_HOST/URL diset, backend membuka
+// koneksi TERPISAH ke broker itu khusus topik lele/#. Jika tidak diset,
+// fallback ke broker utama (mosquitto lokal) — perilaku lama tak berubah.
+// ============================
+let leleMqttClient = mqttClient;
+if (process.env.LELE_MQTT_URL || process.env.LELE_MQTT_HOST) {
+  const proto = process.env.LELE_MQTT_PROTOCOL || 'mqtts';
+  const host = process.env.LELE_MQTT_HOST;
+  const port = process.env.LELE_MQTT_PORT || (proto === 'mqtts' ? 8883 : 1883);
+  const url = process.env.LELE_MQTT_URL || `${proto}://${host}:${port}`;
+  leleMqttClient = mqtt.connect(url, {
+    username: process.env.LELE_MQTT_USER || process.env.MQTT_USER || 'aquaculture',
+    password: process.env.LELE_MQTT_PASSWORD || process.env.MQTT_PASSWORD || 'aquaculture123',
+    clientId: 'backend_lele_' + Math.random().toString(16).substr(2, 8),
+    // Self-signed → set LELE_MQTT_TLS_INSECURE=true. Let's Encrypt → biarkan verifikasi.
+    rejectUnauthorized: process.env.LELE_MQTT_TLS_INSECURE === 'true' ? false : true,
+  });
+  leleMqttClient.on('connect', () => console.log(`✓ MQTT lele (remote) terhubung: ${url}`));
+  leleMqttClient.on('error', (err) => console.error('✗ MQTT lele error:', err.message));
+}
+
+// ============================
 // InfluxDB
 // ============================
 const influxDB = new InfluxDB({
@@ -853,7 +878,7 @@ app.get('/api/health', healthHandler);
 // Lele Feeder Integration
 // ============================
 const { registerLeleHandlers } = require('./lele-integration');
-registerLeleHandlers({ app, pool, mqttClient });
+registerLeleHandlers({ app, pool, mqttClient: leleMqttClient });
 
 app.listen(PORT, () => {
   console.log(`🐟 Backend Smart Aquaculture berjalan di port ${PORT}`);
