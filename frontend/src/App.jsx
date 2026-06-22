@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Routes, Route, NavLink, Link } from 'react-router-dom';
+import { Routes, Route, NavLink, Link, useLocation } from 'react-router-dom';
 import {
   Home, Fish, Activity, BarChart3, Bell, Waves,
-  Skull, Utensils, Settings, LayoutGrid, Cpu,
+  Skull, Utensils, Settings, LayoutGrid, Cpu, Menu, X,
 } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import Farms from './pages/Farms';
@@ -12,10 +12,13 @@ import Simulation from './pages/Simulation';
 import GrafanaView from './pages/GrafanaView';
 import Notifications from './pages/Notifications';
 import LeleFeeder from './pages/LeleFeeder';
+import NotificationToasts from './components/NotificationToasts';
 import { getUnreadCount } from './services/api';
 
 export default function App() {
   const [unreadCount, setUnreadCount] = useState(0);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const location = useLocation();
 
   useEffect(() => {
     let active = true;
@@ -30,9 +33,26 @@ export default function App() {
     return () => { active = false; clearInterval(id); };
   }, []);
 
+  // Tutup sidebar otomatis tiap pindah halaman (mobile)
+  useEffect(() => { setSidebarOpen(false); }, [location.pathname]);
+
   return (
     <div className="app-layout">
-      <aside className="sidebar">
+      <NotificationToasts />
+      {/* Top bar hanya tampil di mobile */}
+      <div className="mobile-topbar">
+        <button className="mobile-menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Buka menu">
+          <Menu size={22} />
+        </button>
+        <Link to="/" className="mobile-topbar-brand">
+          <Waves size={18} /> <span>AquaSmart</span>
+        </Link>
+      </div>
+
+      {/* Overlay gelap saat sidebar terbuka di mobile */}
+      {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
+
+      <aside className={'sidebar' + (sidebarOpen ? ' open' : '')}>
         <Link to="/" className="sidebar-logo">
           <div className="sidebar-logo-icon">
             <Waves size={22} />
@@ -42,6 +62,9 @@ export default function App() {
             <p>Smart Aquaculture System</p>
           </div>
         </Link>
+        <button className="sidebar-close-btn" onClick={() => setSidebarOpen(false)} aria-label="Tutup menu">
+          <X size={20} />
+        </button>
 
         <div className="sidebar-section">
           <div className="sidebar-section-title">Utama</div>

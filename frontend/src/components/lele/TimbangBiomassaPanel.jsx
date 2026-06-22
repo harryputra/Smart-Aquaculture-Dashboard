@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Scale, Play, RefreshCw, Trash2, AlertCircle, TrendingUp, Send, Hash } from 'lucide-react';
+import { Scale, Play, RefreshCw, Trash2, AlertCircle, TrendingUp, Send, Hash, Keyboard } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import {
   remoteStartSampling, remoteResetSamples, remoteConfig,
@@ -13,6 +13,8 @@ export default function TimbangBiomassaPanel({ device }) {
   const [busy, setBusy] = useState(false);
   const [editSample, setEditSample] = useState(false);
   const [sampleCount, setSampleCount] = useState(device.target_sample_count || 10);
+  const [showManualAvg, setShowManualAvg] = useState(false);
+  const [manualAvg, setManualAvg] = useState('');
 
   async function load() {
     try {
@@ -55,6 +57,23 @@ export default function TimbangBiomassaPanel({ device }) {
     setBusy(false);
   }
 
+  async function handleManualAvg() {
+    const val = parseFloat(manualAvg);
+    if (!val || val <= 0 || val > 999) { alert('Masukkan berat rata-rata 0.1 - 999 gram'); return; }
+    if (!confirm(
+      `Set rata-rata berat ikan secara MANUAL ke ${val} g?\n\n` +
+      `Ini akan menggantikan hasil sampling load cell terakhir dan langsung dipakai untuk kalkulasi feeding adaptif.`
+    )) return;
+    setBusy(true);
+    try {
+      await remoteConfig(device.device_id, { avg_fish_g: val });
+      setManualAvg('');
+      setShowManualAvg(false);
+      setTimeout(load, 800);
+    } catch (e) { alert(e.message); }
+    setBusy(false);
+  }
+
   const latestSummary = summaries[0];
   const isOffline = !device.is_online;
   const inProgress = device.current_screen === 'sample_active';
@@ -78,6 +97,13 @@ export default function TimbangBiomassaPanel({ device }) {
   return (
     <>
       {isOffline && <div className="alert alert-danger"><AlertCircle size={18} /><div>Device offline.</div></div>}
+
+      {device.sample_is_manual && (
+        <div className="alert alert-warning">
+          <AlertCircle size={18} />
+          <div><strong>Data sampling terakhir berasal dari input manual</strong> (bukan hasil timbang langsung di load cell), sesuai status terakhir dari device.</div>
+        </div>
+      )}
 
       {inProgress && (
         <div className="alert" style={{ background: 'linear-gradient(135deg, #06b6d4, #0284c7)', color: 'white', border: 'none' }}>
@@ -157,6 +183,7 @@ export default function TimbangBiomassaPanel({ device }) {
             </div>
           )}
 
+
           <button className="btn btn-danger" onClick={handleReset} disabled={busy || isOffline}
             style={{ padding: 18, flexDirection: 'column', alignItems: 'center', gap: 8 }}>
             <Trash2 size={28} />
@@ -166,12 +193,90 @@ export default function TimbangBiomassaPanel({ device }) {
         </div>
       </div>
 
+      {/* Input manual rata-rata berat ikan — alternatif tanpa nimbang satu-satu */}
+      <div className="card mb-6">
+        <div className="card-header">
+          <div>
+            <div className="card-title"><Keyboard size={18} style={{ marginRight: 6, verticalAlign: -3 }} />Input Manual Rata-rata Berat Ikan</div>
+            <div className="card-subtitle">Alternatif kalau tidak mau/sempat nimbang satu-satu di load cell — sesuai fitur LCD "Input Manual"</div>
+          </div>
+        </div>
+
+        {!showManualAvg ? (
+          <button className="btn btn-secondary" onClick={() => setShowManualAvg(true)} disabled={isOffline || device.feeding_in_progress}>
+            <Keyboard size={16} /> Set Rata-rata Manual
+          </button>
+        ) : (
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+            <div style={{ flex: '1 1 200px' }}>
+              <label className="form-label">Rata-rata berat ikan (gram)</label>
+              <input type="number" min="0.1" max="999" step="0.1" className="form-input"
+                placeholder="Contoh: 62.5" value={manualAvg}
+                onChange={e => setManualAvg(e.target.value)} />
+            </div>
+            <button className="btn btn-primary" onClick={handleManualAvg} disabled={busy || !manualAvg}>
+              <Send size={14} /> Kirim ke Device
+            </button>
+            <button className="btn btn-secondary" onClick={() => { setShowManualAvg(false); setManualAvg(''); }}>
+              Batal
+            </button>
+          </div>
+        )}
+
+        <div className="alert alert-warning" style={{ marginTop: 14 }}>
+          <AlertCircle size={16} />
+          <div className="text-xs">
+            Nilai ini akan <strong>menggantikan</strong> hasil sampling load cell terakhir dan langsung dipakai untuk kalkulasi feeding adaptif (biomassa, feeding rate, target per jadwal). Device akan mencatat data ini sebagai "input manual", bukan hasil timbang aktual.
+          </div>
+        </div>
+      </div>
+
+      {/* Ringkasan resmi dari MQTT lele/biomass/summary (bukan cache live status) */}
+      {latestSummary && (
+        <div className="card mb-6">
+          <div className="card-header">
+            <div>
+              <div className="card-title">📦 Ringkasan Sampling Terakhir (dari MQTT)</div>
+              <div className="card-subtitle">
+                Tersimpan saat device publish ke topik <code>lele/biomass/summary</code> — {new Date(latestSummary.summarized_at).toLocaleString('id-ID')}
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+            <div style={{ padding: 14, background: 'var(--bg-elevated)', borderRadius: 10 }}>
+              <div className="text-xs text-muted">Total Rata-rata Berat Ikan</div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--accent-primary)' }}>
+                {parseFloat(latestSummary.average_fish_weight_g).toFixed(2)} g
+              </div>
+            </div>
+            <div style={{ padding: 14, background: 'var(--bg-elevated)', borderRadius: 10 }}>
+              <div className="text-xs text-muted">Jumlah Sample</div>
+              <div style={{ fontSize: 22, fontWeight: 800 }}>{latestSummary.sample_count} ikan</div>
+            </div>
+            <div style={{ padding: 14, background: 'var(--bg-elevated)', borderRadius: 10 }}>
+              <div className="text-xs text-muted">Jumlah Ikan Kolam</div>
+              <div style={{ fontSize: 22, fontWeight: 800 }}>{latestSummary.fish_count} ekor</div>
+            </div>
+            <div style={{ padding: 14, background: 'var(--bg-elevated)', borderRadius: 10 }}>
+              <div className="text-xs text-muted">Estimasi Biomassa</div>
+              <div style={{ fontSize: 22, fontWeight: 800 }}>{parseFloat(latestSummary.estimated_biomass_kg).toFixed(2)} kg</div>
+            </div>
+            <div style={{ padding: 14, background: 'var(--success-light)', borderRadius: 10, border: '2px solid var(--success)' }}>
+              <div className="text-xs" style={{ color: 'var(--success-dark)', fontWeight: 600 }}>Pakan/Jadwal (estimasi)</div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--success-dark)' }}>
+                {Math.round(latestSummary.estimated_feed_per_schedule_g)} g
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Latest session detail */}
       {latestSession.length > 0 && (
         <div className="card mb-6">
           <div className="card-header">
             <div>
-              <div className="card-title">Sampling Terakhir ({latestSession.length} ikan)</div>
+              <div className="card-title">⚖️ Berat Ikan Aktual per Sampling ({latestSession.length} ikan)</div>
               <div className="card-subtitle">{new Date(latestSession[0].sampled_at).toLocaleString('id-ID')}</div>
             </div>
           </div>

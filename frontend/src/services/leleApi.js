@@ -37,8 +37,6 @@ export const remoteAutoGenSchedule = (id) =>
   req(`/devices/${id}/control/auto-gen-schedule`, { method: 'POST' });
 export const remoteValve = (id, action) =>
   req(`/devices/${id}/control/valve`, { method: 'POST', body: { action } });
-export const remoteButton = (id, button) =>
-  req(`/devices/${id}/control/button`, { method: 'POST', body: { button } });
 export const remoteConfig = (id, config) =>
   req(`/devices/${id}/config-mqtt`, { method: 'PUT', body: config });
 export const remoteUpdateSchedule = (id, idx, data) =>

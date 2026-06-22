@@ -43,12 +43,12 @@
 // WIFI + MQTT CONFIG
 // =====================================================
 const bool WIFI_ENABLE = true;
-const bool MQTT_ENABLE = false;
+const bool MQTT_ENABLE = true;
 
-const char* WIFI_SSID     = "PAKAN";
-const char* WIFI_PASSWORD = "12345678";
+const char* WIFI_SSID     = "iPhone";
+const char* WIFI_PASSWORD = "qwerty1234567890";
 
-const char* MQTT_SERVER   = "172.20.10.2";
+const char* MQTT_SERVER   = "172.20.10.3";
 const uint16_t MQTT_PORT  = 1883;
 const char* MQTT_USER     = "aquaculture";
 const char* MQTT_PASSWORD = "aquaculture123";

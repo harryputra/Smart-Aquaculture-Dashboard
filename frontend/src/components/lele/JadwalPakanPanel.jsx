@@ -1,15 +1,22 @@
 import { useEffect, useState } from 'react';
-import { Clock, Wand2, Save, Power, AlertCircle } from 'lucide-react';
-import { remoteUpdateSchedule, remoteAutoGenSchedule, getSyncedSchedules } from '../../services/leleApi';
+import { Clock, Wand2, Save, Power, AlertCircle, History, CheckCircle, XCircle } from 'lucide-react';
+import { remoteUpdateSchedule, remoteAutoGenSchedule, getSyncedSchedules, getLeleSessions } from '../../services/leleApi';
 
 export default function JadwalPakanPanel({ device }) {
   const [synced, setSynced] = useState([]);
+  const [sessions, setSessions] = useState([]);
   const [editing, setEditing] = useState(null);
   const [busy, setBusy] = useState(false);
 
   async function load() {
-    try { setSynced(await getSyncedSchedules(device.device_id)); }
-    catch (e) { /* */ }
+    try {
+      const [sch, sess] = await Promise.all([
+        getSyncedSchedules(device.device_id),
+        getLeleSessions(device.device_id),
+      ]);
+      setSynced(sch);
+      setSessions(sess);
+    } catch (e) { /* */ }
   }
 
   useEffect(() => { load(); const i = setInterval(load, 3000); return () => clearInterval(i); }, [device.device_id]);
@@ -47,6 +54,7 @@ export default function JadwalPakanPanel({ device }) {
     <>
       {isOffline && <div className="alert alert-danger"><AlertCircle size={18} /><div>Device offline.</div></div>}
 
+      {/* JADWAL AKTIF */}
       <div className="card mb-6">
         <div className="card-header">
           <div>
@@ -83,12 +91,52 @@ export default function JadwalPakanPanel({ device }) {
         </div>
       </div>
 
-      <div className="alert alert-info">
+      <div className="alert alert-info" style={{ marginBottom: 24 }}>
         <Clock size={18} />
         <div className="text-xs">
           <strong>Cara kerja:</strong> ESP32 cek RTC tiap menit. Saat jam:menit cocok dengan jadwal aktif & Auto Feed ON,
           device otomatis trigger feed adaptif. Toggle <em>enabled</em> per jadwal kalau mau skip salah satu hari ini saja.
         </div>
+      </div>
+
+      {/* HISTORY PEMBERIAN PAKAN — digabung di tab yang sama dengan jadwal */}
+      <div className="card">
+        <div className="card-header">
+          <div>
+            <div className="card-title"><History size={18} style={{ marginRight: 6, verticalAlign: -3 }} />Riwayat Pemberian Pakan</div>
+            <div className="card-subtitle">Hasil eksekusi tiap jadwal/manual feed, dari MQTT <code>lele/feed/summary</code></div>
+          </div>
+        </div>
+
+        {sessions.length === 0 ? (
+          <div className="empty-state"><p>Belum ada riwayat pemberian pakan</p></div>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Waktu Mulai</th><th>Sesi</th><th>Target Total (g)</th><th>Aktual Total (g)</th><th>Jml Batch</th><th>Status</th></tr>
+              </thead>
+              <tbody>
+                {sessions.slice(0, 30).map(s => (
+                  <tr key={s.feed_session_id}>
+                    <td>{new Date(s.started_at).toLocaleString('id-ID')}</td>
+                    <td><span className="badge badge-info">{s.session_name}</span></td>
+                    <td>{parseFloat(s.target_total_g).toFixed(0)}</td>
+                    <td style={{ fontWeight: 700 }}>{s.actual_total_g ? parseFloat(s.actual_total_g).toFixed(0) : '-'}</td>
+                    <td>{s.actual_batch_count || s.planned_batch_count}</td>
+                    <td>
+                      {s.success
+                        ? <span className="badge badge-success"><CheckCircle size={12} /> Sukses</span>
+                        : (s.completed_at
+                          ? <span className="badge badge-danger"><XCircle size={12} /> Gagal</span>
+                          : <span className="badge badge-warning">Berjalan</span>)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </>
   );

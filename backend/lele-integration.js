@@ -40,9 +40,10 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
             servo_angle, stepper_enabled, spinner_state, next_schedule_hhmm,
             last_feed_success, last_feed_target_g, last_feed_actual_g,
             last_feed_batch_count, last_feed_time,
-            last_error_code, last_error_msg, last_error_time
+            last_error_code, last_error_msg, last_error_time,
+            sample_is_manual, spinner_pwm
           ) VALUES ($1, TRUE, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(),
-            $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32)
+            $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34)
           ON CONFLICT (device_id) DO UPDATE SET
             is_online = TRUE,
             wifi_connected = EXCLUDED.wifi_connected,
@@ -76,7 +77,9 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
             last_feed_time = EXCLUDED.last_feed_time,
             last_error_code = EXCLUDED.last_error_code,
             last_error_msg = EXCLUDED.last_error_msg,
-            last_error_time = EXCLUDED.last_error_time
+            last_error_time = EXCLUDED.last_error_time,
+            sample_is_manual = EXCLUDED.sample_is_manual,
+            spinner_pwm = EXCLUDED.spinner_pwm
         `, [
           deviceId,
           payload.wifi_connected || false,
@@ -110,6 +113,8 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
           payload.last_error_code || 'NONE',
           payload.last_error_msg || '',
           payload.last_error_time || '-',
+          payload.sample_is_manual || false,
+          payload.spinner_pwm || 0,
         ]);
 
         // Sync schedules array
@@ -384,11 +389,18 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
   // Update config via MQTT (langsung ke ESP32)
   app.put('/api/lele/devices/:deviceId/config-mqtt', async (req, res) => {
     try {
-      const { fish_count, feeding_per_day, target_sample_count } = req.body;
+      const { fish_count, feeding_per_day, target_sample_count, avg_fish_g } = req.body;
       const config = {};
       if (fish_count != null) config.fish_count = +fish_count;
       if (feeding_per_day != null) config.feeding_per_day = +feeding_per_day;
       if (target_sample_count != null) config.target_sample_count = +target_sample_count;
+      if (avg_fish_g != null) {
+        const avg = +avg_fish_g;
+        if (avg <= 0 || avg > 999) {
+          return res.status(400).json({ error: 'avg_fish_g harus antara 0.1 - 999 gram' });
+        }
+        config.avg_fish_g = avg;
+      }
       sendConfig(req.params.deviceId, config);
       res.json({ success: true, message: 'Config dikirim ke device' });
     } catch (e) { res.status(500).json({ error: e.message }); }

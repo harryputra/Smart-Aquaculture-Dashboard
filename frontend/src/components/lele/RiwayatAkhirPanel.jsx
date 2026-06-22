@@ -1,27 +1,50 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle, XCircle, AlertTriangle, Calendar, History, Scale, Bug } from 'lucide-react';
-import { getLeleSessions, getLeleErrors, getLeleBiomassSummary } from '../../services/leleApi';
+import { CheckCircle, XCircle, AlertTriangle, Calendar, History, Scale, Bug, Fish } from 'lucide-react';
+import { getLeleSessions, getLeleErrors, getLeleBiomassSummary, getLeleBiomassSamples } from '../../services/leleApi';
 
 export default function RiwayatAkhirPanel({ device }) {
   const [sessions, setSessions] = useState([]);
   const [errors, setErrors] = useState([]);
   const [summaries, setSummaries] = useState([]);
+  const [samples, setSamples] = useState([]);
   const [activeTab, setActiveTab] = useState('summary');
 
   async function load() {
     try {
-      const [s, e, sm] = await Promise.all([
+      const [s, e, sm, sp] = await Promise.all([
         getLeleSessions(device.device_id),
         getLeleErrors(device.device_id),
         getLeleBiomassSummary(device.device_id),
+        getLeleBiomassSamples(device.device_id),
       ]);
-      setSessions(s); setErrors(e); setSummaries(sm);
+      setSessions(s); setErrors(e); setSummaries(sm); setSamples(sp);
     } catch (e) { /* */ }
   }
 
   useEffect(() => { load(); const i = setInterval(load, 5000); return () => clearInterval(i); }, [device.device_id]);
 
   const sessionsBatched = sessions.flatMap(s => (s.batches || []).map(b => ({ ...b, session_name: s.session_name })));
+
+  // Kelompokkan sample ikan per sesi sampling (sample tidak punya session_id eksplisit,
+  // jadi dikelompokkan berdasarkan jarak waktu — gap > 10 menit dianggap sesi baru)
+  const samplingSessions = [];
+  {
+    let current = [];
+    let lastTime = null;
+    for (const sm of samples) {
+      const t = new Date(sm.sampled_at).getTime();
+      if (lastTime && lastTime - t > 600000) {
+        if (current.length) samplingSessions.push(current);
+        current = [];
+      }
+      current.push(sm);
+      lastTime = t;
+    }
+    if (current.length) samplingSessions.push(current);
+  }
+  const samplesFlat = samplingSessions.flatMap((group, idx) =>
+    group.map(s => ({ ...s, session_label: `Sesi ${samplingSessions.length - idx}` }))
+  );
 
   return (
     <>
@@ -104,6 +127,12 @@ export default function RiwayatAkhirPanel({ device }) {
           <button className={'tab' + (activeTab === 'batch' ? ' active' : '')} onClick={() => setActiveTab('batch')}>
             <Calendar size={14} /> Batch Detail
           </button>
+          <button className={'tab' + (activeTab === 'sampling' ? ' active' : '')} onClick={() => setActiveTab('sampling')}>
+            <Scale size={14} /> Riwayat Sampling ({summaries.length})
+          </button>
+          <button className={'tab' + (activeTab === 'fish' ? ' active' : '')} onClick={() => setActiveTab('fish')}>
+            <Fish size={14} /> Detail per Ikan
+          </button>
           <button className={'tab' + (activeTab === 'errors' ? ' active' : '')} onClick={() => setActiveTab('errors')}>
             <Bug size={14} /> Error ({errors.length})
           </button>
@@ -146,13 +175,59 @@ export default function RiwayatAkhirPanel({ device }) {
               <tbody>
                 {sessionsBatched.slice(0, 100).map((b, i) => (
                   <tr key={i}>
-                    <td>{new Date(b.batched_at || b.created_at).toLocaleTimeString('id-ID')}</td>
+                    <td>{b.recorded_at ? new Date(b.recorded_at).toLocaleTimeString('id-ID') : '-'}</td>
                     <td className="text-xs">{b.session_name}</td>
                     <td>{b.batch_no}/{b.total_batches}</td>
                     <td>{parseFloat(b.target_g).toFixed(1)}</td>
-                    <td>{parseFloat(b.actual_g).toFixed(1)}</td>
+                    <td style={{ fontWeight: 700 }}>{parseFloat(b.actual_g).toFixed(1)}</td>
                     <td><span className="badge badge-info">{b.spinner_direction}</span></td>
                     <td>{b.success ? '✅' : '❌'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
+
+        {activeTab === 'sampling' && (summaries.length === 0 ? (
+          <div className="empty-state"><p>Belum ada riwayat sampling</p></div>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Waktu</th><th>Rata-rata Berat (g)</th><th>Jml Sample</th><th>Jml Ikan Kolam</th><th>Estimasi Biomassa (kg)</th><th>Pakan/Jadwal (g)</th></tr>
+              </thead>
+              <tbody>
+                {summaries.map(sm => (
+                  <tr key={sm.id}>
+                    <td>{new Date(sm.summarized_at).toLocaleString('id-ID')}</td>
+                    <td style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>{parseFloat(sm.average_fish_weight_g).toFixed(2)}</td>
+                    <td>{sm.sample_count}</td>
+                    <td>{sm.fish_count}</td>
+                    <td>{parseFloat(sm.estimated_biomass_kg).toFixed(2)}</td>
+                    <td>{Math.round(sm.estimated_feed_per_schedule_g)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
+
+        {activeTab === 'fish' && (samplesFlat.length === 0 ? (
+          <div className="empty-state"><p>Belum ada data berat ikan tercatat</p></div>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Waktu</th><th>Sesi</th><th>Ikan #</th><th>Berat Aktual (g)</th></tr>
+              </thead>
+              <tbody>
+                {samplesFlat.slice(0, 200).map((s, i) => (
+                  <tr key={s.id || i}>
+                    <td>{new Date(s.sampled_at).toLocaleString('id-ID')}</td>
+                    <td><span className="badge badge-info">{s.session_label}</span></td>
+                    <td>{s.fish_no}</td>
+                    <td style={{ fontWeight: 700 }}>{parseFloat(s.fish_weight_g).toFixed(2)}</td>
                   </tr>
                 ))}
               </tbody>
