@@ -29,6 +29,10 @@ set "DC=docker compose"
 docker compose version >nul 2>&1
 if errorlevel 1 set "DC=docker-compose"
 
+REM ---- file compose: base=produksi (frontend+MQTT), dev=+override debug ----
+set "CFBASE=-f docker-compose.yml"
+set "CFDEV=-f docker-compose.yml -f docker-compose.debug.yml"
+
 REM ---- routing perintah ----
 if /i "%CMD%"=="up"           goto :up
 if /i "%CMD%"=="start"        goto :up
@@ -84,17 +88,18 @@ REM ====================================================================
 :up
 call :ensure_env
 call :ensure_passwd
-echo [..] Build ^& start stack (mode lokal)...
-%DC% up -d --build
+echo [..] Build ^& start stack (mode lokal, buka port internal ke 127.0.0.1)...
+%DC% %CFDEV% up -d --build
 if errorlevel 1 goto :end
 call :get_webport
 echo.
 echo ============================================================
 echo   %PROJECT% sudah berjalan (mode LOKAL)
 echo ============================================================
-echo   Frontend  : http://localhost:!WEB_PORT!
-echo   Grafana   : http://localhost:!WEB_PORT!/grafana/
-echo   Backend   : http://127.0.0.1:5000/health
+echo   Frontend   : http://localhost:!WEB_PORT!
+echo   Grafana    : http://localhost:!WEB_PORT!/grafana/
+echo   API health : http://localhost:!WEB_PORT!/api/health
+echo   (dev) Grafana admin http://127.0.0.1:3001  ^|  Postgres 127.0.0.1:5432
 echo ============================================================
 echo   Stop: run.bat down   ^|  Status: run.bat status  ^|  Log: run.bat logs
 echo   Catatan: untuk SERVER gunakan Linux + ./run.sh deploy
@@ -104,14 +109,14 @@ goto :end
 :deploy
 call :ensure_env
 echo ============================================================
-echo   Mode PRODUKSI (deploy)
+echo   Mode PRODUKSI (deploy) - hanya frontend + MQTT di-publish
 echo ============================================================
 echo [WARN] Pastikan secret di .env sudah DIGANTI dari default!
 echo        (DB_PASSWORD, MQTT_PASSWORD, INFLUX_TOKEN, *_ADMIN_PASSWORD)
 echo        Jika MQTT_PASSWORD diganti: run.bat mqtt-passwd
 echo.
 call :ensure_passwd
-%DC% up -d --build
+%DC% %CFBASE% up -d --build
 if errorlevel 1 goto :end
 call :get_webport
 echo.

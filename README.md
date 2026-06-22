@@ -236,18 +236,26 @@ smart-aquaculture/
 
 ## 🌐 Endpoint & Port
 
-Semua port kecuali frontend & MQTT di-bind ke `127.0.0.1` (tidak terbuka ke publik).
+**Produksi** (`./run.sh deploy`) hanya mem-*publish* **frontend** + **MQTT** ke host.
+Postgres/InfluxDB/Grafana/backend **tidak** dibuka ke host (diakses lewat jaringan
+docker internal / proxy nginx) — supaya tak bentrok port di VM bersama & DB aman.
+Port internal hanya dibuka di **dev lokal** (`./run.sh up`, via `docker-compose.debug.yml`).
 Nilai port & kredensial diambil dari `.env` (lihat `.env.example`).
 
-| Service | URL / Bind | Publik? | Default Credentials |
-|---------|------------|---------|---------------------|
-| Frontend | `http://localhost:${WEB_PORT}` (3000) | ✅ via Cloudflare Tunnel | - |
-| Grafana (embed) | `http://localhost:${WEB_PORT}/grafana/` | ✅ (lewat frontend) | anonymous Viewer |
-| Grafana (admin) | `127.0.0.1:${GRAFANA_PORT}` (3001) | ❌ localhost | admin / `$GRAFANA_ADMIN_PASSWORD` |
-| Backend API | `127.0.0.1:${BACKEND_PORT}` (5000) + `/api` via proxy | ❌ localhost | - |
-| InfluxDB | `127.0.0.1:${INFLUX_PORT}` (8086) | ❌ localhost | admin / `$INFLUX_ADMIN_PASSWORD` |
-| PostgreSQL | `127.0.0.1:${DB_PORT}` (5432) | ❌ localhost | `$DB_USER` / `$DB_PASSWORD` |
-| MQTT | `0.0.0.0:${MQTT_PORT}` (1883) | LAN (untuk ESP32) | `$MQTT_USER` / `$MQTT_PASSWORD` |
+| Service | URL / Bind | Publish ke host? | Default Credentials |
+|---------|------------|------------------|---------------------|
+| Frontend | `http://localhost:${WEB_PORT}` (3000) | ✅ prod & dev → Cloudflare Tunnel | - |
+| Grafana (embed) | `http://localhost:${WEB_PORT}/grafana/` | ✅ lewat frontend | anonymous Viewer |
+| API (via proxy) | `http://localhost:${WEB_PORT}/api/...` | ✅ lewat frontend | - |
+| MQTT | `0.0.0.0:${MQTT_PORT}` (1883) | ✅ prod & dev (LAN, untuk ESP32) | `$MQTT_USER` / `$MQTT_PASSWORD` |
+| Grafana (admin) | `127.0.0.1:${GRAFANA_PORT}` (3001) | 🔧 dev only | admin / `$GRAFANA_ADMIN_PASSWORD` |
+| Backend (langsung) | `127.0.0.1:${BACKEND_PORT}` (5000) | 🔧 dev only | - |
+| InfluxDB | `127.0.0.1:${INFLUX_PORT}` (8086) | 🔧 dev only | admin / `$INFLUX_ADMIN_PASSWORD` |
+| PostgreSQL | `127.0.0.1:${DB_PORT}` (5432) | 🔧 dev only | `$DB_USER` / `$DB_PASSWORD` |
+
+> **Port bentrok di server?** Produksi hanya butuh `WEB_PORT` & `MQTT_PORT` bebas.
+> Jika bentrok, ubah keduanya di `.env` lalu `./run.sh deploy` lagi. Akses DB di
+> server: `docker compose exec postgres psql -U $DB_USER $DB_NAME` (tak perlu port host).
 
 ---
 

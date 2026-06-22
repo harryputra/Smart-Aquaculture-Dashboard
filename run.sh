@@ -4,8 +4,8 @@
 # Disesuaikan untuk server lab trin (docker-host VM, 4 GB RAM, Cloudflare Tunnel).
 #
 # Pemakaian:
-#   ./run.sh            # setup penuh + start (mode lokal/dev)
-#   ./run.sh deploy     # mode PRODUKSI persisten (untuk server) + cek secret
+#   ./run.sh            # setup penuh + start (mode lokal/dev, buka port internal)
+#   ./run.sh deploy     # mode PRODUKSI persisten (server) — hanya frontend+MQTT
 #   ./run.sh help       # daftar semua perintah
 # ======================================================================
 set -euo pipefail
@@ -26,13 +26,16 @@ err()  { echo -e "${R}✖${N} $*" >&2; }
 hr()   { echo -e "${B}────────────────────────────────────────────────────────${N}"; }
 
 # ---------- docker compose wrapper (v2 / v1) ----------
-DC=""
+DC_BIN=()
 detect_dc() {
-  if docker compose version >/dev/null 2>&1; then DC="docker compose"
-  elif command -v docker-compose >/dev/null 2>&1; then DC="docker-compose"
+  if docker compose version >/dev/null 2>&1; then DC_BIN=(docker compose)
+  elif command -v docker-compose >/dev/null 2>&1; then DC_BIN=(docker-compose)
   fi
 }
-dc() { $DC "$@"; }
+# File compose: base = produksi (hanya frontend+MQTT); dev = + override debug.
+CF=(-f docker-compose.yml)
+CF_DEV=(-f docker-compose.yml -f docker-compose.debug.yml)
+dc() { "${DC_BIN[@]}" "${CF[@]}" "$@"; }
 
 # ---------- prasyarat ----------
 need_docker() {
@@ -47,7 +50,7 @@ need_docker() {
     exit 1
   fi
   detect_dc
-  if [ -z "$DC" ]; then
+  if [ "${#DC_BIN[@]}" -eq 0 ]; then
     err "Docker Compose tidak ditemukan (butuh 'docker compose' v2 atau 'docker-compose')."
     exit 1
   fi
@@ -131,53 +134,69 @@ port_used() {
   elif command -v netstat >/dev/null 2>&1; then netstat -ltn 2>/dev/null | grep -q ":${p} "
   else return 1; fi
 }
+# Hanya frontend (WEB_PORT) & MQTT (MQTT_PORT) yang dipublikasikan ke host.
 preflight_ports() {
   load_env
-  # Hanya peringatkan bila port dipakai proses LAIN (bukan container project ini)
   local running
   running="$(dc ps -q 2>/dev/null | wc -l | tr -d ' ')"
-  if [ "${running:-0}" = "0" ] && port_used "$WEB_PORT"; then
-    warn "Port ${BOLD}${WEB_PORT}${N} (frontend) sudah dipakai proses lain."
-    warn "Ganti ${BOLD}WEB_PORT${N} di .env, atau matikan proses tsb. Lalu ulangi."
+  [ "${running:-0}" != "0" ] && return 0   # sudah jalan: biarkan compose yang urus
+  if port_used "$WEB_PORT"; then
+    warn "Port ${BOLD}${WEB_PORT}${N} (frontend) sudah dipakai proses lain di host."
+    warn "→ Ganti ${BOLD}WEB_PORT${N} di .env ke port bebas, lalu ulangi."
+  fi
+  if port_used "$MQTT_PORT"; then
+    warn "Port ${BOLD}${MQTT_PORT}${N} (MQTT) sudah dipakai proses lain di host."
+    warn "→ Ganti ${BOLD}MQTT_PORT${N} di .env, atau matikan broker lama."
   fi
 }
 
 # ---------- tunggu siap ----------
+# Cek lewat proxy frontend (/api/health) supaya berlaku untuk dev maupun prod
+# (backend tidak punya port host di mode produksi).
 wait_health() {
   load_env
-  log "Menunggu backend siap (http://127.0.0.1:${BACKEND_PORT}/health)..."
+  local url="http://127.0.0.1:${WEB_PORT}/api/health"
+  log "Menunggu app siap (${url})..."
   local tries=60
   while [ $tries -gt 0 ]; do
-    if curl -fsS "http://127.0.0.1:${BACKEND_PORT}/health" >/dev/null 2>&1; then
-      ok "Backend sehat."
+    if curl -fsS "$url" >/dev/null 2>&1; then
+      ok "App sehat (frontend + backend + DB merespon)."
       return 0
     fi
     sleep 2; tries=$((tries-1))
   done
-  warn "Backend belum merespon dalam batas waktu. Cek log: ./run.sh logs backend"
+  warn "Belum merespon dalam batas waktu. Cek log: ./run.sh logs"
   return 0
 }
 
 # ---------- ringkasan ----------
 summary() {
   load_env
+  local mode="${1:-lokal}"
   hr
-  echo -e "${BOLD}${G}  ${PROJECT} sudah berjalan${N}"
+  echo -e "${BOLD}${G}  ${PROJECT} sudah berjalan (mode ${mode})${N}"
   hr
-  echo -e "  ${BOLD}Akses lokal (host):${N}"
+  echo -e "  ${BOLD}Akses:${N}"
   echo -e "    Frontend (Web App) : ${C}http://localhost:${WEB_PORT}${N}"
-  echo -e "    Grafana embed      : ${C}http://localhost:${WEB_PORT}/grafana/${N}"
-  echo -e "    Grafana langsung   : ${C}http://127.0.0.1:${GRAFANA_PORT}${N}  (admin / \$GRAFANA_ADMIN_PASSWORD)"
-  echo -e "    Backend API/health : ${C}http://127.0.0.1:${BACKEND_PORT}/health${N}"
-  echo -e "    InfluxDB           : ${C}http://127.0.0.1:${INFLUX_PORT}${N}  (admin / \$INFLUX_ADMIN_PASSWORD)"
-  echo -e "    PostgreSQL         : ${C}127.0.0.1:${DB_PORT}${N}"
-  echo -e "    MQTT broker        : ${C}<ip-host>:${MQTT_PORT}${N}  (untuk ESP32 di LAN)"
+  echo -e "    Grafana (embed)    : ${C}http://localhost:${WEB_PORT}/grafana/${N}"
+  echo -e "    API health         : ${C}http://localhost:${WEB_PORT}/api/health${N}"
+  if [ "$mode" = "lokal" ]; then
+    echo
+    echo -e "  ${BOLD}Akses langsung (dev only, port internal di 127.0.0.1):${N}"
+    echo -e "    Grafana admin : ${C}http://127.0.0.1:${GRAFANA_PORT}${N}  (admin / \$GRAFANA_ADMIN_PASSWORD)"
+    echo -e "    InfluxDB      : ${C}http://127.0.0.1:${INFLUX_PORT}${N}    (admin / \$INFLUX_ADMIN_PASSWORD)"
+    echo -e "    PostgreSQL    : ${C}127.0.0.1:${DB_PORT}${N}              (\$DB_USER / \$DB_PASSWORD)"
+  else
+    echo
+    echo -e "  ${BOLD}Produksi:${N} port DB/Influx/Grafana/backend ${BOLD}tidak${N} dibuka ke host"
+    echo -e "  (diakses lewat proxy frontend). Untuk psql/influx pakai:"
+    echo -e "    ${C}./run.sh logs${N}  atau  ${C}docker compose exec postgres psql -U \$DB_USER \$DB_NAME${N}"
+  fi
+  echo -e "    MQTT broker (ESP32 LAN): ${C}<ip-host>:${MQTT_PORT}${N}"
   echo
-  echo -e "  ${BOLD}Data demo:${N} 1 peternakan + kolam contoh sudah di-seed otomatis (database/init.sql)."
-  echo -e "  ${BOLD}Tanpa login${N} — aplikasi tidak punya autentikasi."
+  echo -e "  ${BOLD}Data demo${N} sudah di-seed otomatis (database/init.sql). Tanpa login."
   hr
-  echo -e "  Stop      : ${Y}./run.sh down${N}     | Status : ${Y}./run.sh status${N}"
-  echo -e "  Log       : ${Y}./run.sh logs${N}     | Reset  : ${Y}./run.sh reset${N}"
+  echo -e "  Stop : ${Y}./run.sh down${N}  | Status : ${Y}./run.sh status${N}  | Log : ${Y}./run.sh logs${N}"
   hr
 }
 
@@ -197,11 +216,13 @@ cloudflare_hint() {
 
 # ---------- aksi inti ----------
 do_up() {
-  need_docker; ensure_env; ensure_mqtt_passwd; preflight_ports
+  need_docker; ensure_env; ensure_mqtt_passwd
+  CF=("${CF_DEV[@]}")        # dev: buka port internal ke 127.0.0.1
+  preflight_ports
   log "Build & start stack (mode lokal/dev)..."
   dc up -d --build
   wait_health
-  summary
+  summary "lokal"
   echo -e "  ${Y}Catatan:${N} ini mode lokal. Untuk SERVER pakai ${BOLD}./run.sh deploy${N}."
 }
 
@@ -209,11 +230,13 @@ do_deploy() {
   need_docker; ensure_env
   hr; echo -e "${BOLD}  Mode PRODUKSI (deploy server)${N}"; hr
   check_secrets
-  ensure_mqtt_passwd; preflight_ports
+  ensure_mqtt_passwd
+  CF=(-f docker-compose.yml)  # prod: hanya frontend + MQTT yang di-publish
+  preflight_ports
   log "Build & start stack (detached, restart=unless-stopped, tahan reboot)..."
   dc up -d --build
   wait_health
-  summary
+  summary "produksi"
   cloudflare_hint
 }
 
@@ -236,13 +259,14 @@ do_reset() {
 do_doctor() {
   hr; echo -e "${BOLD}  Doctor — diagnosa${N}"; hr
   command -v docker >/dev/null 2>&1 && ok "docker: $(docker --version)" || err "docker: TIDAK ADA"
-  detect_dc; [ -n "$DC" ] && ok "compose: $DC" || err "compose: TIDAK ADA"
+  detect_dc; [ "${#DC_BIN[@]}" -gt 0 ] && ok "compose: ${DC_BIN[*]}" || err "compose: TIDAK ADA"
   docker info >/dev/null 2>&1 && ok "docker daemon: aktif" || err "docker daemon: MATI"
   [ -f .env ] && ok ".env: ada" || warn ".env: belum ada (akan dibuat dari .env.example)"
   [ -f mosquitto/config/passwd ] && ok "mosquitto passwd: ada" || warn "mosquitto passwd: belum ada (jalankan ./run.sh mqtt-passwd)"
   load_env
-  for p in "$WEB_PORT" "$BACKEND_PORT" "$GRAFANA_PORT" "$DB_PORT" "$INFLUX_PORT" "$MQTT_PORT"; do
-    if port_used "$p"; then warn "port $p: SEDANG DIPAKAI"; else ok "port $p: bebas"; fi
+  echo -e "  ${BOLD}Port host yang dipakai produksi (frontend, MQTT):${N}"
+  for p in "$WEB_PORT" "$MQTT_PORT"; do
+    if port_used "$p"; then warn "port $p: SEDANG DIPAKAI (ganti di .env bila bukan app ini)"; else ok "port $p: bebas"; fi
   done
   hr
 }
@@ -253,8 +277,8 @@ $(echo -e "${BOLD}${PROJECT} — runner${N}")
 
   ./run.sh [perintah]
 
-  ${BOLD}Lokal / dev${N}
-    (kosong) | up   Setup penuh + start stack (mode lokal)
+  ${BOLD}Lokal / dev${N}  (buka port internal ke 127.0.0.1 via docker-compose.debug.yml)
+    (kosong) | up   Setup penuh + start stack
     down            Stop semua container (data aman)
     restart         Restart semua container
     status          Tampilkan status container
@@ -264,7 +288,7 @@ $(echo -e "${BOLD}${PROJECT} — runner${N}")
     mqtt-passwd     (Re)generate mosquitto passwd dari .env
     help            Tampilkan bantuan ini
 
-  ${BOLD}Server / produksi${N}
+  ${BOLD}Server / produksi${N}  (HANYA frontend + MQTT yang di-publish ke host)
     deploy | prod   Start mode produksi (cek secret + petunjuk Cloudflare Tunnel)
     prod-logs       Alias logs (Ctrl+C keluar log, app tetap jalan)
     prod-down       Stop stack produksi
