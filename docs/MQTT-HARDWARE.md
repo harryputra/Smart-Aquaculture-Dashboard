@@ -5,10 +5,15 @@ ke broker MQTT.
 
 ## Pilih skenario Anda
 
-| Skenario | Broker | Panduan |
-|----------|--------|---------|
-| **Kolam jauh** (beda jaringan dgn server, hanya ada WiFi internet) | Broker sendiri di **VPS + TLS** | **[Bagian A](#a-produksi-kolam-jauh-broker-vps--tls)** ⭐ produksi |
-| Kolam & server **satu LAN** (mis. uji di lab) | Mosquitto lokal di server | [Bagian B](#b-lan-kolam--server-satu-jaringan) |
+| Skenario | Cara konek | Panduan |
+|----------|-----------|---------|
+| **Kolam jauh** (beda jaringan, hanya WiFi internet) | **MQTT over WebSocket (WSS)** via Cloudflare Tunnel — tanpa VPS, port 443 | **[docs/MQTT-WEBSOCKET-ESP32.md](MQTT-WEBSOCKET-ESP32.md)** ⭐ rekomendasi |
+| Kolam jauh, ingin broker raw-TCP+TLS di server lain | Broker sendiri di **VPS + TLS** (port 8883) | [Bagian A](#a-produksi-kolam-jauh-broker-vps--tls) |
+| Kolam & server **satu LAN** (mis. uji di lab) | MQTT TCP ke IP LAN server | [Bagian B](#b-lan-kolam--server-satu-jaringan) |
+
+> 💡 Untuk kolam jauh, **WebSocket (WSS) via Cloudflare Tunnel** kini jadi cara
+> termudah & paling tahan-firewall (port 443, tanpa VPS, tanpa kelola sertifikat).
+> Opsi VPS+TLS (Bagian A) tetap valid bila Anda butuh raw-TCP MQTT.
 
 > Inti masalah: server trin hanya bisa diakses dari internet via **Cloudflare
 > Tunnel (HTTP/WS)** — tak ada port TCP publik untuk MQTT. Maka untuk kolam jauh,

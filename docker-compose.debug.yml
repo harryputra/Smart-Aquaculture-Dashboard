@@ -10,10 +10,8 @@
 # ======================================================================
 
 services:
-  mosquitto:
-    ports:
-      - "127.0.0.1:${MQTT_WS_PORT:-9001}:9001"
-
+  # Catatan: WebSocket mosquitto (9001) sudah dipublish di base compose
+  # (untuk Cloudflare Tunnel), jadi tidak diulang di sini.
   influxdb:
     ports:
       - "127.0.0.1:${INFLUX_PORT:-8086}:8086"

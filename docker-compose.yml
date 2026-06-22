@@ -25,7 +25,10 @@ services:
     ports:
       # 1883 perlu diakses ESP32 di LAN → bind ke semua interface (default).
       - "${MQTT_BIND:-0.0.0.0}:${MQTT_PORT:-1883}:1883"
-      # WebSocket 9001 hanya dibuka di dev (lihat docker-compose.debug.yml).
+      # WebSocket 9001 → dipublish ke 127.0.0.1 agar Cloudflare Tunnel bisa
+      # meneruskannya sebagai wss://mqtt.<domain> (MQTT over WebSocket Secure).
+      # ESP32 remote konek lewat sini (port 443 publik). Lihat docs/MQTT-WEBSOCKET-ESP32.md.
+      - "${MQTT_WS_BIND:-127.0.0.1}:${MQTT_WS_PORT:-9001}:9001"
     volumes:
       - ./mosquitto/config:/mosquitto/config
       - ./mosquitto/data:/mosquitto/data

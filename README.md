@@ -261,10 +261,11 @@ Nilai port & kredensial diambil dari `.env` (lihat `.env.example`).
 
 ## 📡 MQTT Topics
 
-> 🔌 **Hubungkan hardware ESP32 ke broker?** Lihat panduan lengkap
-> [docs/MQTT-HARDWARE.md](docs/MQTT-HARDWARE.md) — MQTT lewat **LAN** (bukan
-> Cloudflare Tunnel), config sisi server (UFW + kredensial) & sisi ESP32.
-> Uji tanpa hardware: `./run.sh mqtt-sub` + `./run.sh mqtt-test`.
+> 🔌 **Hubungkan hardware ESP32 ke broker?**
+> - **Kolam jauh (rekomendasi):** MQTT over WebSocket (WSS) via Cloudflare Tunnel —
+>   tanpa VPS, port 443. Panduan pemula lengkap: [docs/MQTT-WEBSOCKET-ESP32.md](docs/MQTT-WEBSOCKET-ESP32.md).
+> - **Pilihan lain (LAN / VPS+TLS):** [docs/MQTT-HARDWARE.md](docs/MQTT-HARDWARE.md).
+> - Uji tanpa hardware: `./run.sh mqtt-sub` + `./run.sh mqtt-test`.
 
 ```
 aquaculture/{farm_id}/{pond_id}/sensors    # Data sensor (dari ESP32 → Server)
