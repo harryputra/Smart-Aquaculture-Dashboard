@@ -1,0 +1,9 @@
+# Skrip shell WAJIB LF agar tidak gagal di server Linux (CRLF -> bad interpreter)
+*.sh text eol=lf
+docker-entrypoint*.sh text eol=lf
+
+# Batch Windows tetap CRLF
+*.bat text eol=crlf
+
+# Normalisasi default
+* text=auto

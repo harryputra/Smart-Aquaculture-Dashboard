@@ -836,7 +836,18 @@ app.get('/api/dashboard/summary', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/health', (req, res) => res.json({ status: 'ok' }));
+// Health check ringan (ping DB). Diekspos juga di /api/health agar bisa dicek
+// dari domain publik via proxy nginx (location /api/).
+async function healthHandler(req, res) {
+  try {
+    await pool.query('SELECT 1');
+    res.json({ status: 'ok', db: 'up', time: new Date().toISOString() });
+  } catch (e) {
+    res.status(503).json({ status: 'degraded', db: 'down', error: e.message });
+  }
+}
+app.get('/health', healthHandler);
+app.get('/api/health', healthHandler);
 
 // ============================
 // Lele Feeder Integration

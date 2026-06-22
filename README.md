@@ -84,23 +84,69 @@ Sistem monitoring dan kontrol peternakan ikan modern berbasis IoT dengan arsitek
 - Docker Compose v2+
 - 4GB RAM, 10GB storage
 
-### Install dalam 3 Langkah
+### Jalankan dalam 1 Perintah (one-click)
 
 ```bash
-# 1. Generate password MQTT
-docker run --rm -v "$(pwd)/mosquitto/config:/mosquitto/config" \
-  eclipse-mosquitto:2.0 \
-  mosquitto_passwd -U /mosquitto/config/passwd.txt
+# Linux / macOS / Git Bash
+./run.sh            # setup .env + passwd MQTT + build + start, lalu tampilkan ringkasan
 
-# 2. Build dan jalankan
-docker compose up -d --build
-
-# 3. Buka browser
-# Web App: http://localhost:3000
-# Grafana: http://localhost:3001 (admin/admin123)
+# Windows
+run.bat
 ```
 
+Lalu buka **http://localhost:3000** (frontend) — Grafana ter-embed di
+`http://localhost:3000/grafana/`. Tanpa login (aplikasi tidak punya autentikasi).
+
+Subcommand lain: `./run.sh down | restart | status | logs [svc] | reset | doctor | mqtt-passwd | help`.
+
 📖 **Tutorial lengkap:** [docs/TUTORIAL-INSTALASI.md](docs/TUTORIAL-INSTALASI.md)
+
+---
+
+## 🖥️ Deploy ke Server Lab trin (Produksi)
+
+Stack ini berat (7 container, termasuk InfluxDB + PostgreSQL + Grafana). VM
+`docker-host` hanya **4 GB RAM / 2 vCPU** dan dibagi dengan app lain — sudah
+dipasang **memory limit per-service** (total ±1.9 GB) agar tidak OOM.
+
+```bash
+# di VM (user trin, lokasi /home/trin/docker/apps/smart-aquaculture/)
+cp .env.example .env
+nano .env                 # WAJIB: ganti semua secret [GANTI], set WEB_PORT bebas,
+                          #        set GRAFANA_ROOT_URL ke domain publik
+./run.sh mqtt-passwd      # bila MQTT_PASSWORD diubah, regenerate file passwd
+./run.sh deploy           # build + start mode produksi (detached, auto-restart, tahan reboot)
+```
+
+`deploy` akan **memperingatkan bila secret masih default** sebelum lanjut.
+
+### Publikasi via Cloudflare Tunnel
+Hanya **frontend** yang dipublikasikan (port DB/backend/Grafana di-bind ke
+`127.0.0.1` saja — tidak terbuka ke publik).
+
+1. Cloudflare dashboard → Tunnels → **proxmox-server** → *Public Hostname*
+2. Tambah `aquaculture.trin-polman.id` → service `http://localhost:${WEB_PORT}`
+3. Set `GRAFANA_ROOT_URL=https://aquaculture.trin-polman.id/grafana/` di `.env` →
+   `./run.sh prod-restart`
+4. **ESP32** konek MQTT ke `172.16.67.5:1883` (buka port `1883` di UFW; ini satu-satunya
+   port non-HTTP yang perlu di-expose ke LAN).
+
+> ⚠️ Pilih `WEB_PORT` yang **bebas** di host — `8088` (koperasi) & `33061` (mariadb) sudah dipakai.
+
+### Verifikasi cepat (TTFB)
+```bash
+curl -s -o /dev/null -w "TTFB:%{time_starttransfer} Total:%{time_total}\n" \
+  https://aquaculture.trin-polman.id/api/health
+```
+TTFB ≤ ~150ms = app sehat. Endpoint `/api/health` melakukan ping DB ringan.
+
+### Update / redeploy
+```bash
+git pull && ./run.sh deploy        # rebuild image + restart, data volume tetap aman
+```
+
+Kelola produksi: `./run.sh prod-logs` (Ctrl+C keluar log, app tetap jalan) ·
+`./run.sh prod-restart` · `./run.sh prod-down`.
 
 ---
 
@@ -190,14 +236,18 @@ smart-aquaculture/
 
 ## 🌐 Endpoint & Port
 
-| Service | URL | Default Credentials |
-|---------|-----|---------------------|
-| Frontend | http://localhost:3000 | - |
-| Grafana | http://localhost:3001 | admin / admin123 |
-| Backend API | http://localhost:5000 | - |
-| InfluxDB | http://localhost:8086 | admin / admin123456 |
-| PostgreSQL | localhost:5432 | aquaculture / aquaculture123 |
-| MQTT | localhost:1883 | aquaculture / aquaculture123 |
+Semua port kecuali frontend & MQTT di-bind ke `127.0.0.1` (tidak terbuka ke publik).
+Nilai port & kredensial diambil dari `.env` (lihat `.env.example`).
+
+| Service | URL / Bind | Publik? | Default Credentials |
+|---------|------------|---------|---------------------|
+| Frontend | `http://localhost:${WEB_PORT}` (3000) | ✅ via Cloudflare Tunnel | - |
+| Grafana (embed) | `http://localhost:${WEB_PORT}/grafana/` | ✅ (lewat frontend) | anonymous Viewer |
+| Grafana (admin) | `127.0.0.1:${GRAFANA_PORT}` (3001) | ❌ localhost | admin / `$GRAFANA_ADMIN_PASSWORD` |
+| Backend API | `127.0.0.1:${BACKEND_PORT}` (5000) + `/api` via proxy | ❌ localhost | - |
+| InfluxDB | `127.0.0.1:${INFLUX_PORT}` (8086) | ❌ localhost | admin / `$INFLUX_ADMIN_PASSWORD` |
+| PostgreSQL | `127.0.0.1:${DB_PORT}` (5432) | ❌ localhost | `$DB_USER` / `$DB_PASSWORD` |
+| MQTT | `0.0.0.0:${MQTT_PORT}` (1883) | LAN (untuk ESP32) | `$MQTT_USER` / `$MQTT_PASSWORD` |
 
 ---
 

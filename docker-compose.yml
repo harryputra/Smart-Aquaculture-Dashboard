@@ -1,4 +1,13 @@
-version: '3.8'
+# ======================================================================
+# Smart Aquaculture — disesuaikan untuk server lab trin (docker-host VM)
+# ----------------------------------------------------------------------
+# - Semua secret dibaca dari .env (lihat .env.example). Default aman untuk
+#   LOKAL, WAJIB diganti sebelum deploy ke server.
+# - Port DB/internal di-bind ke 127.0.0.1 saja (tidak diekspos publik).
+# - Hanya frontend (WEB_PORT) yang dipublikasikan via Cloudflare Tunnel.
+# - MQTT 1883 dibiarkan di 0.0.0.0 agar ESP32 di LAN bisa konek (buka di UFW).
+# - Memory limit dipasang per-service karena VM hanya 4 GB RAM (dibagi app lain).
+# ======================================================================
 
 services:
   # ============================
@@ -9,14 +18,20 @@ services:
     container_name: aquaculture_mosquitto
     restart: unless-stopped
     ports:
-      - "1883:1883"
-      - "9001:9001"
+      # 1883 perlu diakses ESP32 di LAN → bind ke semua interface (default).
+      - "${MQTT_BIND:-0.0.0.0}:${MQTT_PORT:-1883}:1883"
+      # WebSocket hanya untuk keperluan internal/debug → 127.0.0.1 saja.
+      - "${INTERNAL_BIND:-127.0.0.1}:${MQTT_WS_PORT:-9001}:9001"
     volumes:
       - ./mosquitto/config:/mosquitto/config
       - ./mosquitto/data:/mosquitto/data
       - ./mosquitto/log:/mosquitto/log
     networks:
       - aquaculture_net
+    deploy:
+      resources:
+        limits:
+          memory: 96M
 
   # ============================
   # InfluxDB - Time Series Database
@@ -26,19 +41,23 @@ services:
     container_name: aquaculture_influxdb
     restart: unless-stopped
     ports:
-      - "8086:8086"
+      - "${INTERNAL_BIND:-127.0.0.1}:${INFLUX_PORT:-8086}:8086"
     environment:
       - DOCKER_INFLUXDB_INIT_MODE=setup
-      - DOCKER_INFLUXDB_INIT_USERNAME=admin
-      - DOCKER_INFLUXDB_INIT_PASSWORD=admin123456
-      - DOCKER_INFLUXDB_INIT_ORG=aquaculture
-      - DOCKER_INFLUXDB_INIT_BUCKET=sensor_data
-      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=my-super-secret-auth-token
+      - DOCKER_INFLUXDB_INIT_USERNAME=${INFLUX_ADMIN_USER:-admin}
+      - DOCKER_INFLUXDB_INIT_PASSWORD=${INFLUX_ADMIN_PASSWORD:-admin123456}
+      - DOCKER_INFLUXDB_INIT_ORG=${INFLUX_ORG:-aquaculture}
+      - DOCKER_INFLUXDB_INIT_BUCKET=${INFLUX_BUCKET:-sensor_data}
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUX_TOKEN:-my-super-secret-auth-token}
     volumes:
       - influxdb_data:/var/lib/influxdb2
       - influxdb_config:/etc/influxdb2
     networks:
       - aquaculture_net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   # ============================
   # PostgreSQL - Relational Database
@@ -48,16 +67,26 @@ services:
     container_name: aquaculture_postgres
     restart: unless-stopped
     ports:
-      - "5432:5432"
+      - "${INTERNAL_BIND:-127.0.0.1}:${DB_PORT:-5432}:5432"
     environment:
-      - POSTGRES_USER=aquaculture
-      - POSTGRES_PASSWORD=aquaculture123
-      - POSTGRES_DB=aquaculture
+      - POSTGRES_USER=${DB_USER:-aquaculture}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-aquaculture123}
+      - POSTGRES_DB=${DB_NAME:-aquaculture}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-aquaculture} -d ${DB_NAME:-aquaculture}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     networks:
       - aquaculture_net
+    deploy:
+      resources:
+        limits:
+          memory: 384M
 
   # ============================
   # Telegraf - Data Collector
@@ -70,10 +99,24 @@ services:
       - mosquitto
       - influxdb
       - postgres
+    environment:
+      # Diinterpolasi ke dalam telegraf.conf (${VAR}) saat runtime.
+      - MQTT_USER=${MQTT_USER:-aquaculture}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-aquaculture123}
+      - INFLUX_TOKEN=${INFLUX_TOKEN:-my-super-secret-auth-token}
+      - INFLUX_ORG=${INFLUX_ORG:-aquaculture}
+      - INFLUX_BUCKET=${INFLUX_BUCKET:-sensor_data}
+      - DB_USER=${DB_USER:-aquaculture}
+      - DB_PASSWORD=${DB_PASSWORD:-aquaculture123}
+      - DB_NAME=${DB_NAME:-aquaculture}
     volumes:
       - ./telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
     networks:
       - aquaculture_net
+    deploy:
+      resources:
+        limits:
+          memory: 192M
 
   # ============================
   # Grafana - Visualization
@@ -83,15 +126,19 @@ services:
     container_name: aquaculture_grafana
     restart: unless-stopped
     ports:
-      - "3001:3000"
+      - "${INTERNAL_BIND:-127.0.0.1}:${GRAFANA_PORT:-3001}:3000"
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin123}
       - GF_INSTALL_PLUGINS=grafana-clock-panel
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
       - GF_SECURITY_ALLOW_EMBEDDING=true
       - GF_AUTH_DISABLE_LOGIN_FORM=false
+      # Disajikan di bawah subpath /grafana/ agar bisa di-embed same-origin
+      # (di-proxy nginx frontend). Set GRAFANA_ROOT_URL ke domain publik di .env.
+      - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL:-http://localhost:3000/grafana/}
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning
@@ -100,6 +147,10 @@ services:
       - influxdb
     networks:
       - aquaculture_net
+    deploy:
+      resources:
+        limits:
+          memory: 384M
 
   # ============================
   # Backend API - Node.js
@@ -109,43 +160,62 @@ services:
     container_name: aquaculture_backend
     restart: unless-stopped
     ports:
-      - "5000:5000"
+      # Tidak perlu diekspos publik (nginx proxy /api internal lewat network
+      # docker). Dibuka di 127.0.0.1 hanya untuk debugging dari host.
+      - "${INTERNAL_BIND:-127.0.0.1}:${BACKEND_PORT:-5000}:5000"
     environment:
       - NODE_ENV=production
       - PORT=5000
       - DB_HOST=postgres
       - DB_PORT=5432
-      - DB_USER=aquaculture
-      - DB_PASSWORD=aquaculture123
-      - DB_NAME=aquaculture
+      - DB_USER=${DB_USER:-aquaculture}
+      - DB_PASSWORD=${DB_PASSWORD:-aquaculture123}
+      - DB_NAME=${DB_NAME:-aquaculture}
       - MQTT_HOST=mosquitto
       - MQTT_PORT=1883
-      - MQTT_USER=aquaculture
-      - MQTT_PASSWORD=aquaculture123
+      - MQTT_USER=${MQTT_USER:-aquaculture}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-aquaculture123}
+      - INFLUX_HOST=influxdb
       - INFLUX_URL=http://influxdb:8086
-      - INFLUX_TOKEN=my-super-secret-auth-token
-      - INFLUX_ORG=aquaculture
-      - INFLUX_BUCKET=sensor_data
+      - INFLUX_TOKEN=${INFLUX_TOKEN:-my-super-secret-auth-token}
+      - INFLUX_ORG=${INFLUX_ORG:-aquaculture}
+      - INFLUX_BUCKET=${INFLUX_BUCKET:-sensor_data}
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:5000/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     depends_on:
       - postgres
       - mosquitto
       - influxdb
     networks:
       - aquaculture_net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
   # ============================
-  # Frontend - React
+  # Frontend - React (di-publish via Cloudflare Tunnel)
   # ============================
   frontend:
     build: ./frontend
     container_name: aquaculture_frontend
     restart: unless-stopped
     ports:
-      - "3000:80"
+      # Hanya service ini yang dipublikasikan. Di server: Cloudflare Tunnel
+      # → http://localhost:${WEB_PORT}. Bind 127.0.0.1 supaya tak terbuka langsung.
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-3000}:80"
     depends_on:
       - backend
     networks:
       - aquaculture_net
+    deploy:
+      resources:
+        limits:
+          memory: 96M
 
 networks:
   aquaculture_net:
