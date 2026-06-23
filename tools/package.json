@@ -1,0 +1,12 @@
+{
+  "name": "aquaculture-tools",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Alat uji komunikasi MQTT (WSS) Smart Aquaculture",
+  "scripts": {
+    "test:ws": "node test-mqtt-ws.js"
+  },
+  "dependencies": {
+    "mqtt": "^5.3.0"
+  }
+}

@@ -82,6 +82,51 @@ Kalau "Connected" → server siap. Subscribe topik `#` untuk lihat semua pesan.
 
 ---
 
+## 2½. Pengujian komunikasi (berlapis — paling penting)
+
+Uji dari **lapisan paling dalam ke luar** supaya tahu persis di mana masalahnya.
+
+### Lapis 1 — Broker hidup & kredensial benar (lokal, lepas dari internet)
+Di **server**:
+```bash
+# Terminal 1: pantau semua pesan yang masuk ke broker
+./run.sh mqtt-sub
+# Terminal 2: kirim status device palsu
+./run.sh mqtt-test
+```
+Kalau pesan muncul di Terminal 1 → broker + kredensial `.env` **OK**. (Ini lewat
+TCP internal, jadi membuktikan broker sehat tanpa melibatkan Cloudflare.)
+
+### Lapis 2 — Jalur WSS via Cloudflare (persis seperti ESP32)
+Pakai **script uji** [`tools/test-mqtt-ws.js`](../tools/test-mqtt-ws.js) — konek
+`wss://mqtt.trin-polman.id:443`, publish, lalu terima kembali:
+```bash
+# di laptop/Windows yang ada Node.js
+cd tools
+npm install
+MQTT_PASSWORD=passwordasli node test-mqtt-ws.js
+```
+Atau **tanpa Node (mis. di VM, pakai Docker)**:
+```bash
+docker run --rm -e MQTT_PASSWORD=passwordasli -v "$PWD/tools:/t" -w /t \
+  node:20-alpine sh -c "npm i mqtt --silent && node test-mqtt-ws.js"
+```
+Output `🎉 SUKSES` = jalur WSS lewat Cloudflare **berfungsi** → ESP32 dgn config
+sama pasti bisa konek. Kalau gagal, pesannya menunjuk penyebab (port/cred/path).
+
+> Alternatif manual: MQTTX (lihat 2c). Buka **dua koneksi** (atau satu tab
+> subscribe `#`, satu tab publish ke `lele/device/status`) untuk lihat pesan
+> pulang-pergi.
+
+### Lapis 3 — Sampai ke dashboard (end-to-end)
+Setelah Lapis 2 sukses, buka dashboard → menu perangkat lele, device
+`test_ws_01` (atau `pakan_lele_01`) harus muncul. Atau dari server:
+```bash
+curl -s http://localhost:8095/api/lele/devices    # ganti 8095 = WEB_PORT Anda
+```
+
+---
+
 ## 3. Sisi ESP32 — Persiapan (pemula mulai di sini)
 
 ### 3a. Install 3 library
