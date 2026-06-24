@@ -3,7 +3,7 @@ import { ExternalLink, RefreshCw, Maximize2, AlertCircle } from 'lucide-react';
 
 export default function GrafanaView() {
   const [refreshKey, setRefreshKey] = useState(0);
-  const grafanaUrl = 'http://localhost:3001/d/aquaculture/smart-aquaculture-dashboard?orgId=1&refresh=5s&kiosk=tv';
+  const grafanaUrl = '/grafana/d/aquaculture/smart-aquaculture-dashboard?orgId=1&refresh=5s&kiosk=tv';
 
   const handleFullscreen = () => {
     const iframe = document.getElementById('grafana-iframe');
@@ -24,7 +24,7 @@ export default function GrafanaView() {
           <button className="btn btn-secondary" onClick={handleFullscreen}>
             <Maximize2 size={16} /> Layar Penuh
           </button>
-          <button className="btn btn-primary" onClick={() => window.open('http://localhost:3001', '_blank')}>
+          <button className="btn btn-primary" onClick={() => window.open('/grafana/', '_blank')}>
             <ExternalLink size={16} /> Buka di Tab Baru
           </button>
         </div>

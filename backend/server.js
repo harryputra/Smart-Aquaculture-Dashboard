@@ -35,22 +35,36 @@ pool.on('error', (err) => console.error('✗ PostgreSQL error:', err));
 // ============================
 // MQTT Client
 // ============================
+// ============================
+// MQTT Client (over WebSocket Secure - broker server kampus)
+// Sebelumnya konek langsung ke Mosquitto lokal (mqtt://mosquitto:1883),
+// sekarang lewat WSS ke domain kampus supaya satu jalur dengan ESP32
+// dan tidak terganggu masalah IP lokal yang berubah-ubah.
+// ============================
+const MQTT_PROTOCOL = process.env.MQTT_PROTOCOL || 'wss';
+const MQTT_HOST = process.env.MQTT_HOST || 'mqtt.trin-polman.id';
+const MQTT_PORT = process.env.MQTT_PORT || 443;
+const MQTT_PATH = process.env.MQTT_PATH || '/';
+
 const mqttClient = mqtt.connect(
-  `mqtt://${process.env.MQTT_HOST || 'mosquitto'}:${process.env.MQTT_PORT || 1883}`,
+  `${MQTT_PROTOCOL}://${MQTT_HOST}:${MQTT_PORT}${MQTT_PATH}`,
   {
     username: process.env.MQTT_USER || 'aquaculture',
-    password: process.env.MQTT_PASSWORD || 'aquaculture123',
+    password: process.env.MQTT_PASSWORD || 'aquaculture123', // password yang sudah dipakai di sistem kita
     clientId: 'backend_' + Math.random().toString(16).substr(2, 8),
+    protocolVersion: 4,
+    // mqtt.js otomatis kirim header Sec-WebSocket-Protocol: mqtt saat skema ws/wss
   }
 );
 
 mqttClient.on('connect', () => {
-  console.log('✓ MQTT terhubung');
+  console.log(`✓ MQTT terhubung (WSS ke ${MQTT_HOST}:${MQTT_PORT})`);
   mqttClient.subscribe('aquaculture/+/+/sensors');
   mqttClient.subscribe('aquaculture/+/+/status');
 });
 
-mqttClient.on('error', (err) => console.error('✗ MQTT error:', err));
+mqttClient.on('reconnect', () => console.log('… MQTT mencoba reconnect ke broker kampus'));
+mqttClient.on('error', (err) => console.error('✗ MQTT error:', err.message));
 
 // ============================
 // InfluxDB

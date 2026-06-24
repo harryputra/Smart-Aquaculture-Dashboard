@@ -92,6 +92,8 @@ services:
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
       - GF_SECURITY_ALLOW_EMBEDDING=true
       - GF_AUTH_DISABLE_LOGIN_FORM=false
+      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning
@@ -118,8 +120,10 @@ services:
       - DB_USER=aquaculture
       - DB_PASSWORD=aquaculture123
       - DB_NAME=aquaculture
-      - MQTT_HOST=mosquitto
-      - MQTT_PORT=1883
+      - MQTT_PROTOCOL=wss
+      - MQTT_HOST=mqtt.trin-polman.id
+      - MQTT_PORT=443
+      - MQTT_PATH=/
       - MQTT_USER=aquaculture
       - MQTT_PASSWORD=aquaculture123
       - INFLUX_URL=http://influxdb:8086

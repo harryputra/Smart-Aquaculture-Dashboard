@@ -4,7 +4,8 @@
 #include <ESP32Servo.h>
 #include <RTClib.h>
 #include <WiFi.h>
-#include <PubSubClient.h>
+#include <WebSocketsClient.h>      // MQTT over WebSocket Secure (WSS)
+#include <MQTTPubSubClient.h>     // pengganti PubSubClient
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <math.h>
@@ -43,15 +44,19 @@
 // WIFI + MQTT CONFIG
 // =====================================================
 const bool WIFI_ENABLE = true;
-const bool MQTT_ENABLE = false;
+const bool MQTT_ENABLE = true;   // diaktifkan kembali setelah migrasi ke WSS
 
-const char* WIFI_SSID     = "PAKAN";
-const char* WIFI_PASSWORD = "12345678";
+const char* WIFI_SSID     = "Mang_Enti";
+const char* WIFI_PASSWORD = "197610ty";
 
-const char* MQTT_SERVER   = "172.20.10.2";
-const uint16_t MQTT_PORT  = 1883;
-const char* MQTT_USER     = "aquaculture";
-const char* MQTT_PASSWORD = "aquaculture123";
+// MQTT over WebSocket Secure (WSS) - broker server kampus, bukan lokal lagi
+// Tidak ada lagi masalah IP berubah-ubah karena pakai domain, bukan IP LAN
+const char* MQTT_SERVER     = "mqtt.trin-polman.id";
+const uint16_t MQTT_PORT    = 443;
+const char* MQTT_WS_PATH    = "/";
+const char* MQTT_WS_PROTO   = "mqtt";
+const char* MQTT_USER       = "aquaculture";
+const char* MQTT_PASSWORD   = "aquaculture123";   // password yang sudah dipakai di sistem kita
 
 const char* DEVICE_ID = "pakan_lele_01";
 
@@ -76,8 +81,9 @@ const unsigned long WIFI_RECONNECT_MS  = 10000;
 const unsigned long MQTT_RECONNECT_MS  = 5000;
 const unsigned long STATUS_PUBLISH_MS  = 3000;
 
-WiFiClient    wifiClient;
-PubSubClient  mqttClient(wifiClient);
+WebSocketsClient ws;
+MQTTPubSubClient mqtt;
+bool mqttInitialized = false;   // guard supaya ws.beginSSL()+mqtt.begin() cuma jalan sekali
 
 // MQTT topics
 const char* TOPIC_STATUS          = "lele/device/status";
@@ -482,7 +488,8 @@ long secondsToNextSchedule();
 String nextScheduleHHMM();
 String timestampString();
 bool runFeedingSession(float totalFeedGram, String sessionName);
-void onMqttMessage(char* topic, byte* payload, unsigned int length);
+void onCommandMessage(const char* payload, unsigned int length);   // ganti onMqttMessage (PubSubClient)
+void onConfigMessage(const char* payload, unsigned int length);
 void processPendingCommand();
 void publishAck(String cmdName, bool success, String reason);
 void publishDeviceStatus(bool force);
@@ -668,12 +675,13 @@ void clearSamplePrefs() {
 // WIFI + MQTT
 // =====================================================
 bool mqttReady() {
-  return MQTT_ENABLE && WiFi.status() == WL_CONNECTED && mqttClient.connected();
+  return MQTT_ENABLE && WiFi.status() == WL_CONNECTED && mqtt.isConnected();
 }
 
 bool mqttPublish(const char* topic, String payload) {
   if (!mqttReady()) return false;
-  return mqttClient.publish(topic, payload.c_str(), false);
+  mqtt.publish(topic, payload);   // MQTTPubSubClient::publish (over WSS)
+  return true;
 }
 
 void setupWiFi() {
@@ -684,11 +692,19 @@ void setupWiFi() {
   topicCommand = String("lele/device/") + DEVICE_ID + "/command";
   topicConfig  = String("lele/device/") + DEVICE_ID + "/config";
 
-  if (MQTT_ENABLE) {
-    mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
-    mqttClient.setBufferSize(2048);
-    mqttClient.setCallback(onMqttMessage);
-    mqttClient.setKeepAlive(30);
+  // Init MQTT-over-WSS sekali saja (guard mqttInitialized), karena setupWiFi()
+  // bisa terpanggil ulang dari menu WiFi Status -> OK reconnect.
+  if (MQTT_ENABLE && !mqttInitialized) {
+    ws.beginSSL(MQTT_SERVER, MQTT_PORT, MQTT_WS_PATH, "", MQTT_WS_PROTO);
+    mqtt.begin(ws);
+
+    // MQTTPubSubClient: callback per-topic, otomatis di-resubscribe oleh
+    // library tiap kali reconnect berhasil (beda dari PubSubClient lama
+    // yang harus subscribe manual lagi tiap reconnect).
+    mqtt.subscribe(topicCommand, onCommandMessage);
+    mqtt.subscribe(topicConfig,  onConfigMessage);
+
+    mqttInitialized = true;
   }
 
   lcd.clear(); lcdLine(0, "WiFi Connect"); lcdLine(1, "Tunggu...");
@@ -709,25 +725,24 @@ void setupWiFi() {
 void reconnectMqttIfNeeded() {
   if (!MQTT_ENABLE) return;
   if (WiFi.status() != WL_CONNECTED) return;
-  if (mqttClient.connected()) return;
+  if (mqtt.isConnected()) return;
   if (millis() - lastMqttAttempt < MQTT_RECONNECT_MS) return;
 
   lastMqttAttempt = millis();
   uint32_t chipLow = (uint32_t)(ESP.getEfuseMac() & 0xFFFFFFFF);
   String clientId  = String(DEVICE_ID) + "_" + String(chipLow, HEX);
 
-  bool connected;
-  if (String(MQTT_USER).length() > 0)
-    connected = mqttClient.connect(clientId.c_str(), MQTT_USER, MQTT_PASSWORD);
-  else
-    connected = mqttClient.connect(clientId.c_str());
+  // MQTTPubSubClient::connect(client_id, user, password) - lewat WSS yang
+  // sudah disiapkan di setupWiFi(). Subscribe TIDAK perlu diulang di sini,
+  // library otomatis resubscribe ke topic yang sudah didaftarkan sebelumnya.
+  bool connected = mqtt.connect(clientId.c_str(), MQTT_USER, MQTT_PASSWORD);
 
   if (connected) {
-    mqttClient.subscribe(topicCommand.c_str());
-    mqttClient.subscribe(topicConfig.c_str());
-    Serial.printf("[MQTT] Connected, subscribed to %s & %s\n",
-      topicCommand.c_str(), topicConfig.c_str());
+    Serial.printf("[MQTT] Connected (WSS) sbg %s, topic %s & %s\n",
+      clientId.c_str(), topicCommand.c_str(), topicConfig.c_str());
     publishDeviceStatus(true);
+  } else {
+    Serial.println("[MQTT] Gagal connect ke broker, akan dicoba lagi");
   }
 }
 
@@ -749,7 +764,7 @@ void maintainNetwork() {
   }
   if (MQTT_ENABLE) {
     reconnectMqttIfNeeded();
-    if (mqttClient.connected()) mqttClient.loop();
+    mqtt.update();   // ganti mqttClient.loop() - proses pesan masuk via WSS
   }
 }
 
@@ -839,114 +854,127 @@ bool syncRTCfromNTP() {
 // =====================================================
 // MQTT CALLBACK
 // =====================================================
-void onMqttMessage(char* topic, byte* payload, unsigned int length) {
-  String topicStr = String(topic);
-  String message  = "";
-  for (unsigned int i = 0; i < length; i++) message += (char)payload[i];
-  Serial.printf("[MQTT IN] %s: %s\n", topic, message.c_str());
+// =====================================================
+// MQTT CALLBACK - dipecah per-topic (MQTTPubSubClient)
+// Sebelumnya 1 fungsi onMqttMessage(topic, payload, len) di PubSubClient,
+// sekarang 2 fungsi terpisah karena tiap subscribe punya callback sendiri.
+// =====================================================
+void onCommandMessage(const char* payload, unsigned int length) {
+  Serial.printf("[MQTT IN] %s: ", topicCommand.c_str());
+  Serial.write((const uint8_t*)payload, length);
+  Serial.println();
 
   StaticJsonDocument<512> doc;
-  if (deserializeJson(doc, message)) {
+  if (deserializeJson(doc, payload, length)) {
     publishAck("unknown", false, "Invalid JSON");
     return;
   }
 
-  if (topicStr == topicCommand) {
-    const char* command = doc["command"] | "";
+  const char* command = doc["command"] | "";
 
-    if (strcmp(command, "manual_feed_adaptive") == 0) {
-      if (feedingInProgress) { publishAck(command, false, "Sedang feeding"); return; }
-      if (!sampleReady)      { publishAck(command, false, "Sampling belum dilakukan"); return; }
-      pendingCmd.cmd = CMD_MANUAL_FEED_ADAPTIVE;
-      publishAck(command, true, "Queued");
-    }
-    else if (strcmp(command, "manual_feed_gram") == 0) {
-      if (feedingInProgress) { publishAck(command, false, "Sedang feeding"); return; }
-      float g = doc["target_g"] | 0.0;
-      if (g < 10 || g > 5000) { publishAck(command, false, "Range 10-5000g"); return; }
-      pendingCmd.cmd      = CMD_MANUAL_FEED_GRAM;
-      pendingCmd.floatArg = g;
-      publishAck(command, true, "Queued");
-    }
-    else if (strcmp(command, "set_auto_feed") == 0) {
-      bool enabled = doc["enabled"] | false;
-      autoFeedEnabled = enabled;
-      saveSettings();
-      publishDeviceStatus(true);
-      publishAck(command, true, enabled ? "Auto feed ON" : "Auto feed OFF");
-    }
-    else if (strcmp(command, "tare") == 0) {
-      const char* st = doc["scale_type"] | "all";
-      if      (strcmp(st, "chamber")  == 0) pendingCmd.cmd = CMD_TARE_CHAMBER;
-      else if (strcmp(st, "sampling") == 0) pendingCmd.cmd = CMD_TARE_SAMPLING;
-      else                                   pendingCmd.cmd = CMD_TARE_ALL;
-      publishAck(command, true, String("Tare ") + st);
-    }
-    else if (strcmp(command, "reset_samples")    == 0) { pendingCmd.cmd = CMD_RESET_SAMPLES;    publishAck(command, true, "Reset queued"); }
-    else if (strcmp(command, "start_sampling")   == 0) { pendingCmd.cmd = CMD_START_SAMPLING;   publishAck(command, true, "Sampling started"); }
-    else if (strcmp(command, "auto_gen_schedule")== 0) { pendingCmd.cmd = CMD_AUTO_GEN_SCHEDULE; publishAck(command, true, "Schedule auto-gen queued"); }
-    else if (strcmp(command, "open_valve")       == 0) { pendingCmd.cmd = CMD_OPEN_VALVE;       publishAck(command, true, "Servo open"); }
-    else if (strcmp(command, "close_valve")      == 0) { pendingCmd.cmd = CMD_CLOSE_VALVE;      publishAck(command, true, "Servo close"); }
-    else if (strcmp(command, "btn") == 0) {
-      const char* btn = doc["button"] | "";
-      if      (strcmp(btn, "up")   == 0) virtualBtnPressed[B_UP]   = true;
-      else if (strcmp(btn, "down") == 0) virtualBtnPressed[B_DOWN] = true;
-      else if (strcmp(btn, "ok")   == 0) virtualBtnPressed[B_OK]   = true;
-      else if (strcmp(btn, "back") == 0) virtualBtnPressed[B_BACK] = true;
-      else { publishAck(command, false, "Unknown button"); return; }
-      publishAck(command, true, String("Button ") + btn);
-    }
-    else { publishAck(command, false, "Unknown command"); }
+  if (strcmp(command, "manual_feed_adaptive") == 0) {
+    if (feedingInProgress) { publishAck(command, false, "Sedang feeding"); return; }
+    if (!sampleReady)      { publishAck(command, false, "Sampling belum dilakukan"); return; }
+    pendingCmd.cmd = CMD_MANUAL_FEED_ADAPTIVE;
+    publishAck(command, true, "Queued");
   }
-  else if (topicStr == topicConfig) {
-    bool changed = false;
-    if (doc.containsKey("fish_count")) {
-      fishCount = doc["fish_count"]; changed = true;
-    }
-    if (doc.containsKey("feeding_per_day")) {
-      feedingPerDay = doc["feeding_per_day"];
-      if (feedingPerDay < 1) feedingPerDay = 1;
-      if (feedingPerDay > SCHEDULE_COUNT) feedingPerDay = SCHEDULE_COUNT;
-      autoGenerateSchedulesFromFeedingPerDay(); changed = true;
-    }
-    if (doc.containsKey("target_sample_count")) {
-      targetSampleCount = doc["target_sample_count"];
-      if (targetSampleCount < MIN_SAMPLE_COUNT) targetSampleCount = MIN_SAMPLE_COUNT;
-      if (targetSampleCount > MAX_SAMPLE_COUNT) targetSampleCount = MAX_SAMPLE_COUNT;
+  else if (strcmp(command, "manual_feed_gram") == 0) {
+    if (feedingInProgress) { publishAck(command, false, "Sedang feeding"); return; }
+    float g = doc["target_g"] | 0.0;
+    if (g < 10 || g > 5000) { publishAck(command, false, "Range 10-5000g"); return; }
+    pendingCmd.cmd      = CMD_MANUAL_FEED_GRAM;
+    pendingCmd.floatArg = g;
+    publishAck(command, true, "Queued");
+  }
+  else if (strcmp(command, "set_auto_feed") == 0) {
+    bool enabled = doc["enabled"] | false;
+    autoFeedEnabled = enabled;
+    saveSettings();
+    publishDeviceStatus(true);
+    publishAck(command, true, enabled ? "Auto feed ON" : "Auto feed OFF");
+  }
+  else if (strcmp(command, "tare") == 0) {
+    const char* st = doc["scale_type"] | "all";
+    if      (strcmp(st, "chamber")  == 0) pendingCmd.cmd = CMD_TARE_CHAMBER;
+    else if (strcmp(st, "sampling") == 0) pendingCmd.cmd = CMD_TARE_SAMPLING;
+    else                                   pendingCmd.cmd = CMD_TARE_ALL;
+    publishAck(command, true, String("Tare ") + st);
+  }
+  else if (strcmp(command, "reset_samples")    == 0) { pendingCmd.cmd = CMD_RESET_SAMPLES;    publishAck(command, true, "Reset queued"); }
+  else if (strcmp(command, "start_sampling")   == 0) { pendingCmd.cmd = CMD_START_SAMPLING;   publishAck(command, true, "Sampling started"); }
+  else if (strcmp(command, "auto_gen_schedule")== 0) { pendingCmd.cmd = CMD_AUTO_GEN_SCHEDULE; publishAck(command, true, "Schedule auto-gen queued"); }
+  else if (strcmp(command, "open_valve")       == 0) { pendingCmd.cmd = CMD_OPEN_VALVE;       publishAck(command, true, "Servo open"); }
+  else if (strcmp(command, "close_valve")      == 0) { pendingCmd.cmd = CMD_CLOSE_VALVE;      publishAck(command, true, "Servo close"); }
+  else if (strcmp(command, "btn") == 0) {
+    const char* btn = doc["button"] | "";
+    if      (strcmp(btn, "up")   == 0) virtualBtnPressed[B_UP]   = true;
+    else if (strcmp(btn, "down") == 0) virtualBtnPressed[B_DOWN] = true;
+    else if (strcmp(btn, "ok")   == 0) virtualBtnPressed[B_OK]   = true;
+    else if (strcmp(btn, "back") == 0) virtualBtnPressed[B_BACK] = true;
+    else { publishAck(command, false, "Unknown button"); return; }
+    publishAck(command, true, String("Button ") + btn);
+  }
+  else { publishAck(command, false, "Unknown command"); }
+}
+
+void onConfigMessage(const char* payload, unsigned int length) {
+  Serial.printf("[MQTT IN] %s: ", topicConfig.c_str());
+  Serial.write((const uint8_t*)payload, length);
+  Serial.println();
+
+  StaticJsonDocument<512> doc;
+  if (deserializeJson(doc, payload, length)) {
+    publishAck("unknown", false, "Invalid JSON");
+    return;
+  }
+
+  bool changed = false;
+  if (doc.containsKey("fish_count")) {
+    fishCount = doc["fish_count"]; changed = true;
+  }
+  if (doc.containsKey("feeding_per_day")) {
+    feedingPerDay = doc["feeding_per_day"];
+    if (feedingPerDay < 1) feedingPerDay = 1;
+    if (feedingPerDay > SCHEDULE_COUNT) feedingPerDay = SCHEDULE_COUNT;
+    autoGenerateSchedulesFromFeedingPerDay(); changed = true;
+  }
+  if (doc.containsKey("target_sample_count")) {
+    targetSampleCount = doc["target_sample_count"];
+    if (targetSampleCount < MIN_SAMPLE_COUNT) targetSampleCount = MIN_SAMPLE_COUNT;
+    if (targetSampleCount > MAX_SAMPLE_COUNT) targetSampleCount = MAX_SAMPLE_COUNT;
+    changed = true;
+  }
+  if (doc.containsKey("avg_fish_g")) {
+    float avg = doc["avg_fish_g"];
+    if (avg > 0.0) {
+      if (avg > MANUAL_AVG_MAX_G) avg = MANUAL_AVG_MAX_G;
+      sampleAverageGram = avg;
+      savedSampleCount  = targetSampleCount;
+      sampleReady       = true;
+      sampleIsManual    = true;
+      updateFeedingRateFromSampling();
+      lastSampleAverageGram = sampleAverageGram;
+      lastSampleCount       = savedSampleCount;
+      lastSampleTime        = timestampString();
+      saveSampleSummaryToPrefs();
+      publishBiomassSummary();
       changed = true;
     }
-    if (doc.containsKey("avg_fish_g")) {
-      float avg = doc["avg_fish_g"];
-      if (avg > 0.0) {
-        if (avg > MANUAL_AVG_MAX_G) avg = MANUAL_AVG_MAX_G;
-        sampleAverageGram = avg;
-        savedSampleCount  = targetSampleCount;
-        sampleReady       = true;
-        sampleIsManual    = true;
-        updateFeedingRateFromSampling();
-        lastSampleAverageGram = sampleAverageGram;
-        lastSampleCount       = savedSampleCount;
-        lastSampleTime        = timestampString();
-        saveSampleSummaryToPrefs();
-        publishBiomassSummary();
-        changed = true;
-      }
+  }
+  if (doc.containsKey("schedule_index")) {
+    int idx = doc["schedule_index"];
+    if (idx >= 0 && idx < SCHEDULE_COUNT) {
+      if (doc.containsKey("hour"))    scheduleHour[idx]    = doc["hour"];
+      if (doc.containsKey("minute"))  scheduleMinute[idx]  = doc["minute"];
+      if (doc.containsKey("enabled")) scheduleEnabled[idx] = doc["enabled"];
+      scheduleTriggeredToday[idx] = false;
+      changed = true;
     }
-    if (doc.containsKey("schedule_index")) {
-      int idx = doc["schedule_index"];
-      if (idx >= 0 && idx < SCHEDULE_COUNT) {
-        if (doc.containsKey("hour"))    scheduleHour[idx]    = doc["hour"];
-        if (doc.containsKey("minute"))  scheduleMinute[idx]  = doc["minute"];
-        if (doc.containsKey("enabled")) scheduleEnabled[idx] = doc["enabled"];
-        scheduleTriggeredToday[idx] = false;
-        changed = true;
-      }
-    }
-    if (changed) {
-      saveSettings();
-      publishDeviceStatus(true);
-      publishAck("config_update", true, "Config applied");
-    }
+  }
+  if (changed) {
+    saveSettings();
+    publishDeviceStatus(true);
+    publishAck("config_update", true, "Config applied");
   }
 }
 
