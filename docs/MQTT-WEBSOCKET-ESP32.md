@@ -104,8 +104,12 @@ Pakai **script uji** [`tools/test-mqtt-ws.js`](../tools/test-mqtt-ws.js) — kon
 # di laptop/Windows yang ada Node.js
 cd tools
 npm install
-MQTT_PASSWORD=passwordasli node test-mqtt-ws.js
+node test-mqtt-ws.js <password>        # <password> = MQTT_PASSWORD asli server
+# contoh: node test-mqtt-ws.js aquaculture123
+# (kalau password masih default aquaculture123, cukup: node test-mqtt-ws.js)
 ```
+> PowerShell: jangan pakai `VAR=nilai node ...` (itu syntax bash). Pakai argumen
+> seperti di atas, atau `$env:MQTT_PASSWORD="aquaculture123"; node test-mqtt-ws.js`.
 Atau **tanpa Node (mis. di VM, pakai Docker)**:
 ```bash
 docker run --rm -e MQTT_PASSWORD=passwordasli -v "$PWD/tools:/t" -w /t \

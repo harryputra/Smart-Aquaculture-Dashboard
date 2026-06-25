@@ -6,24 +6,27 @@
  *
  *  Cara pakai (dari laptop/Windows yang ada Node.js):
  *     cd tools
- *     npm install            # sekali (mengunduh paket mqtt)
- *     # set kredensial lalu jalankan:
- *     MQTT_PASSWORD=passwordasli node test-mqtt-ws.js
+ *     npm install                      # sekali (mengunduh paket mqtt)
+ *     node test-mqtt-ws.js <password>  # password = MQTT_PASSWORD asli di server
  *
- *  Atau lewat Docker (mis. di VM, tanpa Node terpasang) — lihat README server.
+ *  Contoh:  node test-mqtt-ws.js aquaculture123
+ *  (Jika password server masih default aquaculture123, cukup: node test-mqtt-ws.js)
  *
- *  Env yang bisa diatur:
- *     MQTT_URL       (default wss://mqtt.trin-polman.id:443/)
- *     MQTT_USER      (default aquaculture)
- *     MQTT_PASSWORD  (default aquaculture123)
- *     DEVICE_ID      (default test_ws_01)
+ *  Lintas-OS — TIDAK perlu syntax "VAR=nilai node ..." (itu cuma utk bash/Linux).
+ *  Di PowerShell pakai argumen di atas, atau set dulu:
+ *     $env:MQTT_PASSWORD="aquaculture123"; node test-mqtt-ws.js
+ *
+ *  Argumen / env (env menang bila keduanya diisi):
+ *     argv[2] = password   argv[3] = MQTT_URL   argv[4] = DEVICE_ID
+ *     MQTT_URL (default wss://mqtt.trin-polman.id:443/), MQTT_USER (aquaculture),
+ *     MQTT_PASSWORD (aquaculture123), DEVICE_ID (test_ws_01)
  * ====================================================================== */
 const mqtt = require('mqtt');
 
-const URL      = process.env.MQTT_URL      || 'wss://mqtt.trin-polman.id:443/';
+const URL      = process.env.MQTT_URL      || process.argv[3] || 'wss://mqtt.trin-polman.id:443/';
 const USER     = process.env.MQTT_USER     || 'aquaculture';
-const PASSWORD = process.env.MQTT_PASSWORD || 'aquaculture123';
-const DEVICE   = process.env.DEVICE_ID     || 'test_ws_01';
+const PASSWORD = process.env.MQTT_PASSWORD || process.argv[2] || 'aquaculture123';
+const DEVICE   = process.env.DEVICE_ID     || process.argv[4] || 'test_ws_01';
 const TOPIC    = 'lele/device/status';
 
 console.log('──────────────────────────────────────────────');
