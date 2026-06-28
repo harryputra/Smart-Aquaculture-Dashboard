@@ -9,6 +9,11 @@
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <math.h>
+#include <HTTPClient.h>          // OTA: unduh .bin via HTTPS
+#include <WiFiClientSecure.h>    // OTA: TLS
+#include <Update.h>              // OTA: tulis ke slot flash
+#include "mbedtls/md.h"          // OTA: sha256 (API generik, stabil di mbedtls 2.x & 3.x)
+#include "esp_ota_ops.h"         // OTA: konfirmasi sehat / rollback
 
 // =====================================================
 // PAKAN LELE OTOMATIS - V3.4
@@ -93,6 +98,25 @@ const char* TOPIC_ACK             = "lele/device/ack";
 
 String topicCommand;
 String topicConfig;
+
+// =====================================================
+// OTA (update firmware jarak jauh) — lihat docs/RENCANA-OTA.md
+// =====================================================
+const char* FIRMWARE_VERSION = "3.6.0";
+// Host dashboard (lewat Cloudflare) untuk unduh .bin & cek manifest self-check.
+const char* OTA_API_HOST = "aquaculture.trin-polman.id";
+// Validasi sertifikat HTTPS saat unduh: 1 = lewati (integritas TETAP dijamin
+// sha256 dari manifest MQTT yang sudah TLS+auth). 0 = validasi → paste OTA_ROOT_CA.
+#define OTA_TLS_INSECURE 1
+const char* OTA_ROOT_CA = "";                 // PEM root CA bila OTA_TLS_INSECURE 0
+#define OTA_SELFCHECK_ENABLE 1                 // cek manifest server saat boot + berkala
+const unsigned long OTA_SELFCHECK_INTERVAL_MS = 6UL * 3600UL * 1000UL;
+
+const char* TOPIC_OTA_STATUS = "lele/device/ota_status";
+String topicOta;                              // lele/device/<id>/ota
+volatile bool otaPending = false;
+String otaUrl, otaSha256, otaVersion;
+unsigned long lastOtaCheck = 0;
 
 // =====================================================
 // LCD I2C 16x2 + RTC DS3231
@@ -497,6 +521,11 @@ String timestampString();
 bool runFeedingSession(float totalFeedGram, String sessionName);
 void onMqttMessage(const String& topic, const String& payload, const size_t size);
 void processPendingCommand();
+void processPendingOTA();
+void otaConfirmHealthy();
+void otaCheckSelf();
+bool performOTA();
+void publishOtaStatus(const char* state, const String& detail, int progress);
 void publishAck(String cmdName, bool success, String reason);
 void publishDeviceStatus(bool force);
 void publishBiomassSample(int fishNo, float weightGram);
@@ -723,6 +752,7 @@ void setupWiFi() {
 
   topicCommand = String("lele/device/") + DEVICE_ID + "/command";
   topicConfig  = String("lele/device/") + DEVICE_ID + "/config";
+  topicOta     = String("lele/device/") + DEVICE_ID + "/ota";
 
   if (MQTT_ENABLE) {
     // MQTT over WebSocket Secure (port 443) lewat Cloudflare Tunnel.
@@ -773,8 +803,12 @@ void reconnectMqttIfNeeded() {
     mqttClient.subscribe(topicConfig, [](const String& payload, const size_t size) {
       onMqttMessage(topicConfig, payload, size);
     });
-    Serial.printf("[MQTT] Connected, subscribed to %s & %s\n",
-      topicCommand.c_str(), topicConfig.c_str());
+    mqttClient.subscribe(topicOta, [](const String& payload, const size_t size) {
+      onMqttMessage(topicOta, payload, size);
+    });
+    Serial.printf("[MQTT] Connected, subscribed to %s, %s, %s\n",
+      topicCommand.c_str(), topicConfig.c_str(), topicOta.c_str());
+    otaConfirmHealthy();   // MQTT jalan = firmware sehat → batalkan rollback (bila pending)
     publishDeviceStatus(true);
   }
 }
@@ -799,6 +833,14 @@ void maintainNetwork() {
     mqttClient.update();          // WAJIB tiap loop: pump WebSocket + keepalive
     reconnectMqttIfNeeded();
   }
+#if OTA_SELFCHECK_ENABLE
+  // Self-check OTA: cek manifest server saat boot (pertama) + tiap interval.
+  if (WiFi.status() == WL_CONNECTED && mqttReady() && !feedingInProgress &&
+      (lastOtaCheck == 0 || millis() - lastOtaCheck >= OTA_SELFCHECK_INTERVAL_MS)) {
+    lastOtaCheck = millis();
+    otaCheckSelf();
+  }
+#endif
 }
 
 // =====================================================
@@ -895,6 +937,20 @@ void onMqttMessage(const String& topic, const String& payload, const size_t size
   StaticJsonDocument<512> doc;
   if (deserializeJson(doc, message)) {
     publishAck("unknown", false, "Invalid JSON");
+    return;
+  }
+
+  // ---- OTA: manifest update firmware ----
+  if (topicStr == topicOta) {
+    String url = doc["url"] | "";
+    String sha = doc["sha256"] | "";
+    String ver = doc["version"] | "";
+    sha.toLowerCase();
+    if (url.length() < 8 || sha.length() != 64) { publishAck("ota", false, "Manifest tidak valid"); return; }
+    if (ver.length() && ver == String(FIRMWARE_VERSION)) { publishAck("ota", false, "Sudah versi terbaru"); return; }
+    if (feedingInProgress) { publishAck("ota", false, "Sedang feeding — OTA ditunda"); }
+    otaUrl = url; otaSha256 = sha; otaVersion = ver; otaPending = true;
+    publishAck("ota", true, String("OTA diterima: v") + ver);
     return;
   }
 
@@ -1135,6 +1191,7 @@ void publishDeviceStatus(bool forcePublish) {
 
   String payload = "{";
   payload += "\"device_id\":\""          + String(DEVICE_ID)                             + "\",";
+  payload += "\"firmware_version\":\""   + String(FIRMWARE_VERSION)                       + "\",";
   payload += "\"timestamp\":\""          + timestampString()                              + "\",";
   payload += "\"wifi_connected\":"        + String(WiFi.status()==WL_CONNECTED?"true":"false") + ",";
   payload += "\"mqtt_connected\":"        + String(mqttReady() ? "true" : "false")        + ",";
@@ -2753,10 +2810,163 @@ void setup() {
 // =====================================================
 // LOOP
 // =====================================================
+// =====================================================
+// OTA — update firmware jarak jauh (HTTPS pull + sha256 + rollback)
+// =====================================================
+String otaSha256Hex(const uint8_t* h) {
+  char buf[65];
+  for (int i = 0; i < 32; i++) sprintf(buf + i * 2, "%02x", h[i]);
+  buf[64] = 0;
+  return String(buf);
+}
+
+void publishOtaStatus(const char* state, const String& detail, int progress) {
+  if (!mqttReady()) return;
+  String p = "{";
+  p += "\"device_id\":\""      + String(DEVICE_ID)      + "\",";
+  p += "\"version\":\""        + String(FIRMWARE_VERSION) + "\",";
+  p += "\"target_version\":\"" + otaVersion             + "\",";
+  p += "\"state\":\""          + String(state)          + "\",";
+  p += "\"progress\":"         + String(progress)       + ",";
+  p += "\"detail\":\""         + detail                 + "\"}";
+  mqttPublish(TOPIC_OTA_STATUS, p);
+}
+
+// Konfirmasi firmware baru sehat → batalkan rollback (no-op bila bootloader
+// tanpa rollback / bukan boot pasca-OTA).
+void otaConfirmHealthy() {
+  static bool done = false;
+  if (done) return;
+  done = true;
+  const esp_partition_t* running = esp_ota_get_running_partition();
+  esp_ota_img_states_t st;
+  if (running && esp_ota_get_state_partition(running, &st) == ESP_OK) {
+    if (st == ESP_OTA_IMG_PENDING_VERIFY) {
+      esp_ota_mark_app_valid_cancel_rollback();
+      Serial.println("[OTA] Firmware baru dikonfirmasi sehat (rollback dibatalkan).");
+    }
+  }
+}
+
+// Unduh .bin via HTTPS, verifikasi sha256, tulis ke slot non-aktif, reboot.
+bool performOTA() {
+  if (WiFi.status() != WL_CONNECTED) { publishOtaStatus("fail", "WiFi tidak tersambung", 0); return false; }
+  Serial.printf("[OTA] Mulai unduh: %s\n", otaUrl.c_str());
+  lcd.clear(); lcdLine(0, "UPDATE FIRMWARE"); lcdLine(1, "Unduh...");
+  publishOtaStatus("downloading", "mulai", 0);
+
+  WiFiClientSecure client;
+#if OTA_TLS_INSECURE
+  client.setInsecure();                 // integritas dijamin sha256 (manifest MQTT)
+#else
+  client.setCACert(OTA_ROOT_CA);
+#endif
+  client.setTimeout(15000);
+
+  HTTPClient https;
+  https.setConnectTimeout(15000);
+  https.setTimeout(20000);
+  if (!https.begin(client, otaUrl)) { publishOtaStatus("fail", "begin() gagal", 0); return false; }
+
+  int code = https.GET();
+  if (code != HTTP_CODE_OK) { publishOtaStatus("fail", String("HTTP ") + code, 0); https.end(); return false; }
+  int total = https.getSize();
+  if (total <= 0) { publishOtaStatus("fail", "ukuran tidak diketahui", 0); https.end(); return false; }
+  if (!Update.begin(total)) { publishOtaStatus("fail", String("Update.begin: ") + Update.errorString(), 0); https.end(); return false; }
+
+  WiFiClient* stream = https.getStreamPtr();
+  mbedtls_md_context_t ctx; mbedtls_md_init(&ctx);
+  mbedtls_md_setup(&ctx, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), 0);
+  mbedtls_md_starts(&ctx);
+  uint8_t buf[1024];
+  int written = 0, lastPct = -10;
+  unsigned long lastData = millis();
+  while (https.connected() && written < total) {
+    size_t avail = stream->available();
+    if (avail) {
+      int r = stream->readBytes(buf, avail > sizeof(buf) ? sizeof(buf) : avail);
+      if (r <= 0) break;
+      if (Update.write(buf, r) != (size_t)r) { Update.abort(); publishOtaStatus("fail", "tulis flash gagal", (int)((long)written * 100 / total)); https.end(); mbedtls_md_free(&ctx); return false; }
+      mbedtls_md_update(&ctx, buf, r);
+      written += r;
+      lastData = millis();
+      int pct = (int)((long)written * 100 / total);
+      if (pct >= lastPct + 10) { lastPct = pct; lcdLine(1, String("Unduh ") + pct + "%"); publishOtaStatus("downloading", "", pct); mqttClient.update(); }
+    } else {
+      if (millis() - lastData > 20000) { Update.abort(); publishOtaStatus("fail", "timeout unduh", (int)((long)written * 100 / total)); https.end(); mbedtls_md_free(&ctx); return false; }
+      delay(5);
+    }
+  }
+  https.end();
+
+  if (written != total) { Update.abort(); publishOtaStatus("fail", "unduhan tidak lengkap", (int)((long)written * 100 / total)); mbedtls_md_free(&ctx); return false; }
+
+  uint8_t hash[32]; mbedtls_md_finish(&ctx, hash); mbedtls_md_free(&ctx);
+  String got = otaSha256Hex(hash);
+  if (got != otaSha256) {
+    Update.abort();
+    Serial.printf("[OTA] sha256 MISMATCH got=%s want=%s\n", got.c_str(), otaSha256.c_str());
+    publishOtaStatus("fail", "sha256 tidak cocok", 100);
+    lcd.clear(); lcdLine(0, "UPDATE GAGAL"); lcdLine(1, "Checksum salah"); delay(1500); lcd.clear();
+    return false;
+  }
+  if (!Update.end(true)) { publishOtaStatus("fail", String("Update.end: ") + Update.errorString(), 100); return false; }
+
+  Serial.println("[OTA] Sukses. Reboot ke firmware baru...");
+  publishOtaStatus("success", String("v") + otaVersion + " terpasang, reboot", 100);
+  mqttClient.update(); delay(400);
+  lcd.clear(); lcdLine(0, "UPDATE OK"); lcdLine(1, "Reboot..."); delay(1200);
+  ESP.restart();
+  return true;
+}
+
+void processPendingOTA() {
+  if (!otaPending) return;
+  if (feedingInProgress) return;          // jangan update saat feeding; coba lagi nanti
+  otaPending = false;
+  performOTA();                           // sukses → restart; gagal → tetap firmware lama
+}
+
+// Self-check: tanya manifest terbaru ke server; bila ada versi baru → antrikan.
+void otaCheckSelf() {
+  if (WiFi.status() != WL_CONNECTED) return;
+  WiFiClientSecure client;
+#if OTA_TLS_INSECURE
+  client.setInsecure();
+#else
+  client.setCACert(OTA_ROOT_CA);
+#endif
+  client.setTimeout(10000);
+  HTTPClient https;
+  https.setConnectTimeout(8000);
+  https.setTimeout(10000);
+  String url = String("https://") + OTA_API_HOST +
+    "/api/lele/firmware/latest?model=pakan_lele&current=" + FIRMWARE_VERSION + "&device=" + DEVICE_ID;
+  if (!https.begin(client, url)) return;
+  int code = https.GET();
+  if (code == HTTP_CODE_OK) {
+    String body = https.getString();
+    StaticJsonDocument<512> d;
+    if (!deserializeJson(d, body)) {
+      bool avail = d["update_available"] | false;
+      String ver = d["version"] | "";
+      String u   = d["url"] | "";
+      String sha = d["sha256"] | "";
+      sha.toLowerCase();
+      if (avail && u.length() > 8 && sha.length() == 64 && ver != String(FIRMWARE_VERSION)) {
+        otaUrl = u; otaSha256 = sha; otaVersion = ver; otaPending = true;
+        Serial.printf("[OTA] Self-check: versi baru %s tersedia\n", ver.c_str());
+      }
+    }
+  }
+  https.end();
+}
+
 void loop() {
   maintainNetwork();
   publishDeviceStatus(false);
   processPendingCommand();
+  processPendingOTA();
   checkAutoSchedule();
 
   switch (currentScreen) {
