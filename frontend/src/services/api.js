@@ -93,3 +93,14 @@ export const harvestCycle = (pondId, data) =>
 export const getCycles = (pondId) => req(`/ponds/${pondId}/cycles`);
 export const cancelCycle = (pondId, notes) =>
   req(`/ponds/${pondId}/cycle/cancel`, { method: 'POST', body: { notes } });
+
+// Sampling Biomassa & Pertumbuhan
+export const getCurrentBiomass = (pondId) => req(`/ponds/${pondId}/biomass/current`);
+export const getBiomassHistory = (pondId) => req(`/ponds/${pondId}/biomass`);
+export const startBiomass = (pondId) => req(`/ponds/${pondId}/biomass/start`, { method: 'POST' });
+export const addBiomassEntry = (pondId, weight_g) =>
+  req(`/ponds/${pondId}/biomass/entry`, { method: 'POST', body: { weight_g } });
+export const deleteBiomassEntry = (pondId, entryId) =>
+  req(`/ponds/${pondId}/biomass/entry/${entryId}`, { method: 'DELETE' });
+export const finalizeBiomass = (pondId) =>
+  req(`/ponds/${pondId}/biomass/finalize`, { method: 'POST' });

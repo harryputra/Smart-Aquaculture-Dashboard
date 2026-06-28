@@ -179,6 +179,118 @@ function registerCycleHandlers({ app, pool }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // ====================================================================
+  // FASE 2 — Sampling Biomassa & Pertumbuhan
+  // ====================================================================
+  const genSampleId = (pondId) => 'bms_' + pondId + '_' + Date.now().toString(36);
+  // Rekomendasi feeding rate dari berat rata-rata (gram).
+  const recommendedRate = (avgG) => (avgG <= 0 ? 4 : avgG < 50 ? 5 : avgG <= 100 ? 4 : 3);
+
+  async function recalcSample(sampleId) {
+    await pool.query(
+      `UPDATE biomass_samples SET
+         sample_count   = (SELECT COUNT(*)            FROM biomass_sample_entries WHERE sample_id=$1),
+         total_weight_g = (SELECT COALESCE(SUM(weight_g),0) FROM biomass_sample_entries WHERE sample_id=$1),
+         avg_weight_g   = (SELECT COALESCE(AVG(weight_g),0) FROM biomass_sample_entries WHERE sample_id=$1)
+       WHERE sample_id=$1`, [sampleId]);
+  }
+  async function sessionWithEntries(sampleId) {
+    const s = await pool.query(`SELECT * FROM biomass_samples WHERE sample_id=$1`, [sampleId]);
+    if (!s.rows.length) return null;
+    const e = await pool.query(`SELECT * FROM biomass_sample_entries WHERE sample_id=$1 ORDER BY fish_no ASC`, [sampleId]);
+    return { ...s.rows[0], entries: e.rows };
+  }
+
+  // Sesi sampling yang sedang berjalan (+ entries)
+  app.get('/api/ponds/:pondId/biomass/current', async (req, res) => {
+    try {
+      const r = await pool.query(
+        `SELECT sample_id FROM biomass_samples WHERE pond_id=$1 AND status='in_progress' ORDER BY sampled_at DESC LIMIT 1`,
+        [req.params.pondId]);
+      if (!r.rows.length) return res.json(null);
+      res.json(await sessionWithEntries(r.rows[0].sample_id));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Mulai sesi sampling (atau kembalikan yang sedang berjalan)
+  app.post('/api/ponds/:pondId/biomass/start', async (req, res) => {
+    const pondId = req.params.pondId;
+    try {
+      const ex = await pool.query(
+        `SELECT sample_id FROM biomass_samples WHERE pond_id=$1 AND status='in_progress' ORDER BY sampled_at DESC LIMIT 1`, [pondId]);
+      if (ex.rows.length) return res.json(await sessionWithEntries(ex.rows[0].sample_id));
+      const cyc = await pool.query(`SELECT cycle_id FROM pond_cycles WHERE pond_id=$1 AND status='active' LIMIT 1`, [pondId]);
+      const cycleId = cyc.rows[0]?.cycle_id || null;
+      const sampleId = genSampleId(pondId);
+      await pool.query(
+        `INSERT INTO biomass_samples (sample_id, cycle_id, pond_id, status) VALUES ($1,$2,$3,'in_progress')`,
+        [sampleId, cycleId, pondId]);
+      res.json(await sessionWithEntries(sampleId));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Tambah timbangan satu ikan
+  app.post('/api/ponds/:pondId/biomass/entry', async (req, res) => {
+    const pondId = req.params.pondId;
+    try {
+      const w = parseFloat(req.body?.weight_g);
+      if (!w || w <= 0 || w > 9999) return res.status(400).json({ error: 'weight_g tidak valid (0–9999 g).' });
+      const r = await pool.query(
+        `SELECT sample_id FROM biomass_samples WHERE pond_id=$1 AND status='in_progress' ORDER BY sampled_at DESC LIMIT 1`, [pondId]);
+      if (!r.rows.length) return res.status(400).json({ error: 'Tidak ada sesi sampling aktif. Mulai dulu.' });
+      const sampleId = r.rows[0].sample_id;
+      const cnt = await pool.query(`SELECT COUNT(*) AS c FROM biomass_sample_entries WHERE sample_id=$1`, [sampleId]);
+      const fishNo = (parseInt(cnt.rows[0].c) || 0) + 1;
+      await pool.query(`INSERT INTO biomass_sample_entries (sample_id, fish_no, weight_g) VALUES ($1,$2,$3)`, [sampleId, fishNo, w]);
+      await recalcSample(sampleId);
+      res.json(await sessionWithEntries(sampleId));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Hapus satu entry
+  app.delete('/api/ponds/:pondId/biomass/entry/:entryId', async (req, res) => {
+    try {
+      const er = await pool.query(`SELECT sample_id FROM biomass_sample_entries WHERE id=$1`, [req.params.entryId]);
+      if (!er.rows.length) return res.status(404).json({ error: 'Entry tak ada.' });
+      const sampleId = er.rows[0].sample_id;
+      await pool.query(`DELETE FROM biomass_sample_entries WHERE id=$1`, [req.params.entryId]);
+      await recalcSample(sampleId);
+      res.json(await sessionWithEntries(sampleId));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Finalisasi: hitung rata-rata + auto feeding-rate + update siklus aktif
+  app.post('/api/ponds/:pondId/biomass/finalize', async (req, res) => {
+    const pondId = req.params.pondId;
+    try {
+      const r = await pool.query(
+        `SELECT * FROM biomass_samples WHERE pond_id=$1 AND status='in_progress' ORDER BY sampled_at DESC LIMIT 1`, [pondId]);
+      if (!r.rows.length) return res.status(400).json({ error: 'Tidak ada sesi sampling aktif.' });
+      const s = r.rows[0];
+      if ((s.sample_count || 0) < 1) return res.status(400).json({ error: 'Belum ada ikan ditimbang.' });
+      const avg = parseFloat(s.avg_weight_g) || 0;
+      const rate = recommendedRate(avg);
+      await pool.query(
+        `UPDATE biomass_samples SET status='completed', feeding_rate_percent=$2, sampled_at=NOW() WHERE sample_id=$1`,
+        [s.sample_id, rate]);
+      // Update siklus aktif: feeding rate ikut hasil sampling
+      await pool.query(
+        `UPDATE pond_cycles SET feeding_rate_percent=$2 WHERE pond_id=$1 AND status='active'`, [pondId, rate]);
+      res.json({ ...(await sessionWithEntries(s.sample_id)), recommended_rate: rate });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Riwayat sampling selesai (untuk kurva pertumbuhan)
+  app.get('/api/ponds/:pondId/biomass', async (req, res) => {
+    try {
+      const r = await pool.query(
+        `SELECT sample_id, cycle_id, sample_count, avg_weight_g, feeding_rate_percent, sampled_at
+         FROM biomass_samples WHERE pond_id=$1 AND status='completed' ORDER BY sampled_at ASC`,
+        [req.params.pondId]);
+      res.json(r.rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   console.log('✓ Cycle/budidaya handlers registered');
 }
 
