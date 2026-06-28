@@ -2,10 +2,12 @@ const API = '/api/lele';
 
 async function req(path, opts = {}) {
   const res = await fetch(API + path, {
+    credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
     ...opts,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
+  if (res.status === 401) window.dispatchEvent(new CustomEvent('auth:unauthorized'));
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `HTTP ${res.status}`);

@@ -3,8 +3,10 @@ import { Link, useParams } from 'react-router-dom';
 import { Plus, Droplets, Wifi, WifiOff, ArrowLeft, Trash2, X, MapPin } from 'lucide-react';
 import { getFarm, getPonds, createPond, deletePond } from '../services/api';
 import { getLeleDevices, assignLeleDevice } from '../services/leleApi';
+import { useCan } from '../context/AuthContext';
 
 export default function FarmDetail() {
+  const { canWrite, canDelete } = useCan();
   const { farmId } = useParams();
   const [farm, setFarm] = useState(null);
   const [ponds, setPonds] = useState([]);
@@ -61,9 +63,11 @@ export default function FarmDetail() {
             {farm.owner && ` · Pemilik: ${farm.owner}`}
           </p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowModal(true)}>
-          <Plus size={18} /> Tambah Kolam
-        </button>
+        {canWrite && (
+          <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+            <Plus size={18} /> Tambah Kolam
+          </button>
+        )}
       </div>
 
       {farm.description && (
@@ -84,13 +88,15 @@ export default function FarmDetail() {
         <div className="pond-grid">
           {ponds.map(p => (
             <div key={p.pond_id} className="pond-card" style={{ position: 'relative' }}>
-              <button
-                className="btn btn-icon btn-secondary"
-                onClick={e => { e.stopPropagation(); handleDelete(p.pond_id, p.name); }}
-                style={{ position: 'absolute', top: 12, right: 12 }}
-              >
-                <Trash2 size={14} />
-              </button>
+              {canDelete && (
+                <button
+                  className="btn btn-icon btn-secondary"
+                  onClick={e => { e.stopPropagation(); handleDelete(p.pond_id, p.name); }}
+                  style={{ position: 'absolute', top: 12, right: 12 }}
+                >
+                  <Trash2 size={14} />
+                </button>
+              )}
               <Link to={`/ponds/${p.pond_id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
                 <div className="pond-card-header">
                   <div className="pond-card-icon"><Droplets size={22} /></div>

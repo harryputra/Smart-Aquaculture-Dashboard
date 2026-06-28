@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Plus, Fish, MapPin, User, Trash2, X } from 'lucide-react';
 import { getFarms, createFarm, deleteFarm } from '../services/api';
+import { useCan } from '../context/AuthContext';
 
 export default function Farms() {
+  const { canWrite, canDelete } = useCan();
   const [farms, setFarms] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ name: '', location: '', owner: '', description: '' });
@@ -42,9 +44,11 @@ export default function Farms() {
           <h1 className="page-title">Peternakan</h1>
           <p className="page-subtitle">Kelola semua peternakan ikan Anda</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowModal(true)}>
-          <Plus size={18} /> Tambah Peternakan
-        </button>
+        {canWrite && (
+          <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+            <Plus size={18} /> Tambah Peternakan
+          </button>
+        )}
       </div>
 
       {farms.length === 0 ? (
@@ -59,14 +63,16 @@ export default function Farms() {
         <div className="pond-grid">
           {farms.map(f => (
             <div key={f.farm_id} className="pond-card" style={{ position: 'relative' }}>
-              <button
-                className="btn btn-icon btn-secondary"
-                onClick={(e) => { e.stopPropagation(); handleDelete(f.farm_id, f.name); }}
-                style={{ position: 'absolute', top: 12, right: 12 }}
-                title="Hapus"
-              >
-                <Trash2 size={14} />
-              </button>
+              {canDelete && (
+                <button
+                  className="btn btn-icon btn-secondary"
+                  onClick={(e) => { e.stopPropagation(); handleDelete(f.farm_id, f.name); }}
+                  style={{ position: 'absolute', top: 12, right: 12 }}
+                  title="Hapus"
+                >
+                  <Trash2 size={14} />
+                </button>
+              )}
               <Link to={`/farms/${f.farm_id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
                 <div className="pond-card-header">
                   <div className="pond-card-icon"><Fish size={22} /></div>

@@ -2,14 +2,28 @@ const API = '/api';
 
 async function req(path, opts = {}) {
   const res = await fetch(API + path, {
+    credentials: 'same-origin',     // kirim cookie sesi (same-origin via proxy)
     headers: { 'Content-Type': 'application/json' },
     ...opts,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (res.status === 401 && !path.startsWith('/auth/')) {
+    window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+  }
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try { const j = await res.json(); if (j?.error) msg = j.error; } catch { /* ignore */ }
+    throw new Error(msg);
+  }
   if (res.status === 204) return null;
   return res.json();
 }
+
+// Auth
+export const authLogin = (email, password) => req('/auth/login', { method: 'POST', body: { email, password } });
+export const authLogout = () => req('/auth/logout', { method: 'POST' });
+export const authMe = () => req('/auth/me');
+export const authRefresh = () => req('/auth/refresh', { method: 'POST' });
 
 // Farms
 export const getFarms = () => req('/farms');

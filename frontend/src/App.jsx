@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Routes, Route, NavLink, Link, useLocation } from 'react-router-dom';
 import {
   Home, Fish, Activity, BarChart3, Bell, Waves,
-  Skull, Utensils, Settings, LayoutGrid, Cpu, Menu, X, Radio, Wrench, Plug,
+  Skull, Utensils, Settings, LayoutGrid, Cpu, Menu, X, Radio, Wrench, Plug, LogOut,
 } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import Farms from './pages/Farms';
@@ -15,10 +15,22 @@ import LeleFeeder from './pages/LeleFeeder';
 import MqttMonitor from './pages/MqttMonitor';
 import HardwareTest from './pages/HardwareTest';
 import Devices from './pages/Devices';
+import Login from './pages/Login';
 import NotificationToasts from './components/NotificationToasts';
 import { getUnreadCount } from './services/api';
+import { useAuth, ROLE_LABEL } from './context/AuthContext';
 
 export default function App() {
+  const { user, loading } = useAuth();
+  if (loading) {
+    return <div className="loading" style={{ minHeight: '100vh' }}><div className="spinner" /></div>;
+  }
+  if (!user) return <Login />;
+  return <Shell />;
+}
+
+function Shell() {
+  const { user, logout } = useAuth();
   const [unreadCount, setUnreadCount] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
@@ -107,6 +119,24 @@ export default function App() {
           <NavLink to="/analytics" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
             <BarChart3 size={18} /> <span>Grafana Analytics</span>
           </NavLink>
+        </div>
+
+        <div className="sidebar-user" style={{ marginTop: 'auto', padding: 12, borderTop: '1px solid var(--border-primary)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+            <div style={{
+              width: 36, height: 36, borderRadius: 10, flexShrink: 0, display: 'grid', placeItems: 'center',
+              color: 'white', fontWeight: 700, background: 'linear-gradient(135deg,#0891b2,#06b6d4)',
+            }}>{(user?.name || user?.email || '?').charAt(0).toUpperCase()}</div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {user?.name || user?.email}
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>{ROLE_LABEL[user?.role] || user?.role}</div>
+            </div>
+          </div>
+          <button className="btn btn-secondary btn-sm" style={{ width: '100%' }} onClick={logout}>
+            <LogOut size={15} /> Keluar
+          </button>
         </div>
       </aside>
 
