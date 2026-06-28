@@ -25,6 +25,16 @@ export const authLogout = () => req('/auth/logout', { method: 'POST' });
 export const authMe = () => req('/auth/me');
 export const authRefresh = () => req('/auth/refresh', { method: 'POST' });
 
+// Manajemen pengguna & organisasi
+export const getUsers = (orgId) => req('/users' + (orgId ? `?org_id=${encodeURIComponent(orgId)}` : ''));
+export const createUser = (data) => req('/users', { method: 'POST', body: data });
+export const updateUser = (id, data) => req(`/users/${id}`, { method: 'PUT', body: data });
+export const deleteUser = (id) => req(`/users/${id}`, { method: 'DELETE' });
+export const getOrgs = () => req('/orgs');
+export const createOrg = (data) => req('/orgs', { method: 'POST', body: data });
+export const updateOrg = (id, data) => req(`/orgs/${id}`, { method: 'PUT', body: data });
+export const deleteOrg = (id) => req(`/orgs/${id}`, { method: 'DELETE' });
+
 // Farms
 export const getFarms = () => req('/farms');
 export const getFarm = (id) => req(`/farms/${id}`);

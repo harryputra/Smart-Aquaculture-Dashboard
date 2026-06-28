@@ -3,6 +3,7 @@ import { Routes, Route, NavLink, Link, useLocation } from 'react-router-dom';
 import {
   Home, Fish, Activity, BarChart3, Bell, Waves,
   Skull, Utensils, Settings, LayoutGrid, Cpu, Menu, X, Radio, Wrench, Plug, LogOut,
+  Users as UsersIcon,
 } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import Farms from './pages/Farms';
@@ -16,9 +17,10 @@ import MqttMonitor from './pages/MqttMonitor';
 import HardwareTest from './pages/HardwareTest';
 import Devices from './pages/Devices';
 import Login from './pages/Login';
+import Users from './pages/Users';
 import NotificationToasts from './components/NotificationToasts';
 import { getUnreadCount } from './services/api';
-import { useAuth, ROLE_LABEL } from './context/AuthContext';
+import { useAuth, useCan, ROLE_LABEL } from './context/AuthContext';
 
 export default function App() {
   const { user, loading } = useAuth();
@@ -31,6 +33,7 @@ export default function App() {
 
 function Shell() {
   const { user, logout } = useAuth();
+  const { canManageUsers } = useCan();
   const [unreadCount, setUnreadCount] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
@@ -121,6 +124,15 @@ function Shell() {
           </NavLink>
         </div>
 
+        {canManageUsers && (
+          <div className="sidebar-section">
+            <div className="sidebar-section-title">Administrasi</div>
+            <NavLink to="/users" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
+              <UsersIcon size={18} /> <span>Pengguna</span>
+            </NavLink>
+          </div>
+        )}
+
         <div className="sidebar-user" style={{ marginTop: 'auto', padding: 12, borderTop: '1px solid var(--border-primary)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
             <div style={{
@@ -153,6 +165,7 @@ function Shell() {
           <Route path="/mqtt-monitor" element={<MqttMonitor />} />
           <Route path="/hardware-test" element={<HardwareTest />} />
           <Route path="/devices" element={<Devices />} />
+          <Route path="/users" element={<Users />} />
         </Routes>
       </main>
     </div>
