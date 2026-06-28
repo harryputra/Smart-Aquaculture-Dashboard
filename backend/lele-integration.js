@@ -10,6 +10,7 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
   mqttClient.subscribe('lele/feed/session');
   mqttClient.subscribe('lele/feed/batch');
   mqttClient.subscribe('lele/feed/summary');
+  mqttClient.subscribe('lele/feed/progress');   // telemetri live penimbangan
   mqttClient.subscribe('lele/device/error');
   mqttClient.subscribe('lele/device/ack');
 
@@ -17,6 +18,7 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
 
   const ackCache = {};
   const liveDataCache = {};
+  const feedProgressCache = {};   // progress penimbangan live per device (in-memory)
 
   // Rekam lalu lintas MQTT (untuk monitor/diagnostik). Fire-and-forget.
   function recordTraffic(direction, topic, payloadStr, deviceId) {
@@ -40,6 +42,11 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
     // Rekam inbound lebih dulu (termasuk bila payload bukan JSON valid).
     let _did = null;
     try { _did = JSON.parse(_raw).device_id || null; } catch (_) {}
+    // Progress penimbangan high-frequency: cache di memori, JANGAN spam DB/log.
+    if (topic === 'lele/feed/progress') {
+      try { const p = JSON.parse(_raw); if (p.device_id) feedProgressCache[p.device_id] = { ...p, received_at: Date.now() }; } catch (_) {}
+      return;
+    }
     recordTraffic('in', topic, _raw, _did);
     try {
       const payload = JSON.parse(_raw);
@@ -389,6 +396,23 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
       sendCommand(req.params.deviceId, 'ping');
       res.json({ success: true, sentAt: Date.now() });
     } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Progress penimbangan pakan LIVE (in-memory). null bila tak sedang feeding (>5s basi).
+  app.get('/api/lele/devices/:deviceId/feed-progress', (req, res) => {
+    const p = feedProgressCache[req.params.deviceId] || null;
+    if (p && Date.now() - p.received_at > 5000) return res.json(null);
+    res.json(p);
+  });
+
+  // Set mode pakan: manual | jadwal | auto (sinkron ke hardware via MQTT).
+  app.post('/api/lele/devices/:deviceId/control/feed-mode', (req, res) => {
+    const mode = String(req.body?.mode || '').toLowerCase();
+    if (!['manual', 'jadwal', 'auto'].includes(mode)) {
+      return res.status(400).json({ error: 'mode harus manual|jadwal|auto' });
+    }
+    sendCommand(req.params.deviceId, 'set_feed_mode', { mode });
+    res.json({ success: true, mode });
   });
 
   // ============================

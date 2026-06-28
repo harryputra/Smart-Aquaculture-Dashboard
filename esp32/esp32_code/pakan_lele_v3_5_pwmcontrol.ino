@@ -82,6 +82,7 @@ const char* TOPIC_BIOMASS_SAMPLE  = "lele/biomass/sample";
 const char* TOPIC_BIOMASS_SUMMARY = "lele/biomass/summary";
 const char* TOPIC_FEED_SESSION    = "lele/feed/session";
 const char* TOPIC_FEED_BATCH      = "lele/feed/batch";
+const char* TOPIC_FEED_PROGRESS   = "lele/feed/progress";   // telemetri LIVE saat penimbangan
 const char* TOPIC_FEED_SUMMARY    = "lele/feed/summary";
 const char* TOPIC_ERROR           = "lele/device/error";
 const char* TOPIC_ACK             = "lele/device/ack";
@@ -102,7 +103,10 @@ Preferences prefs;
 bool rtcReady         = false;
 bool ntpSynced        = false;     // true jika RTC sudah pernah disinkron via NTP
 unsigned long lastNtpSyncMs = 0;   // millis() saat NTP sync terakhir berhasil
-bool autoFeedEnabled  = true;
+bool autoFeedEnabled  = true;   // kompat: true bila feedMode != Manual
+// Mode pakan (diset dari dashboard/panel): 0=Manual (hanya trigger manual),
+// 1=Jadwal (pakan otomatis di jam terjadwal), 2=Auto (Jadwal + rate ikut sampling terbaru).
+int  feedMode = 1;
 bool feedingInProgress = false;
 
 // =====================================================
@@ -402,7 +406,7 @@ String mainMenu[MAIN_MENU_COUNT] = {
 };
 
 const int FEED_MENU_COUNT = 3;
-String feedMenu[FEED_MENU_COUNT] = { "Auto Feed ON/OFF", "Feed Manual", "Lihat Target" };
+String feedMenu[FEED_MENU_COUNT] = { "Mode Pakan", "Feed Manual", "Lihat Target" };
 
 const int BIOMASS_MENU_COUNT = 5;
 String biomassMenu[BIOMASS_MENU_COUNT] = {
@@ -484,6 +488,7 @@ void publishBiomassSample(int fishNo, float weightGram);
 void publishBiomassSummary();
 void publishFeedSessionStart(String sid, String sname, float total, int batches);
 void publishFeedBatch(String sid, int bn, int tb, float tg, float ag, bool ok);
+void publishFeedProgress(int batchNo, int totalBatches, float targetG, float currentG);
 void publishFeedSummary(String sid, String sname, float total, float actual, int batches, bool ok);
 void publishError(String code, String msg);
 void autoGenerateSchedulesFromFeedingPerDay();
@@ -588,6 +593,17 @@ void setError(String code, String message) {
 // =====================================================
 // PREFERENCES
 // =====================================================
+// ---- Helper mode pakan (Manual/Jadwal/Auto) ----
+const char* feedModeStr() { return feedMode == 0 ? "manual" : (feedMode == 1 ? "jadwal" : "auto"); }
+void applyFeedMode(int m) { if (m < 0) m = 0; if (m > 2) m = 2; feedMode = m; autoFeedEnabled = (feedMode != 0); }
+int parseFeedMode(const char* s) {
+  if (!s) return -1;
+  if (!strcmp(s, "manual")) return 0;
+  if (!strcmp(s, "jadwal") || !strcmp(s, "schedule")) return 1;
+  if (!strcmp(s, "auto")) return 2;
+  return -1;
+}
+
 void loadSettings() {
   prefs.begin("pakan", false);
 
@@ -600,6 +616,7 @@ void loadSettings() {
   if (targetSampleCount > MAX_SAMPLE_COUNT) targetSampleCount = MAX_SAMPLE_COUNT;
 
   autoFeedEnabled = prefs.getBool("autoFeed", true);
+  applyFeedMode(prefs.getInt("feedMode", autoFeedEnabled ? 1 : 0));  // migrasi dari setting autoFeed lama
 
   for (int i = 0; i < SCHEDULE_COUNT; i++) {
     char keyH[8], keyM[8], keyE[8];
@@ -632,6 +649,7 @@ void saveSettings() {
   prefs.putInt ("feedDay",      feedingPerDay);
   prefs.putInt ("sampleTarget", targetSampleCount);
   prefs.putBool("autoFeed",     autoFeedEnabled);
+  prefs.putInt ("feedMode",     feedMode);
 
   for (int i = 0; i < SCHEDULE_COUNT; i++) {
     char keyH[8], keyM[8], keyE[8];
@@ -871,10 +889,18 @@ void onMqttMessage(const String& topic, const String& payload, const size_t size
     }
     else if (strcmp(command, "set_auto_feed") == 0) {
       bool enabled = doc["enabled"] | false;
-      autoFeedEnabled = enabled;
+      applyFeedMode(enabled ? 1 : 0);   // kompat: ON→Jadwal, OFF→Manual
       saveSettings();
       publishDeviceStatus(true);
       publishAck(command, true, enabled ? "Auto feed ON" : "Auto feed OFF");
+    }
+    else if (strcmp(command, "set_feed_mode") == 0) {
+      int m = parseFeedMode(doc["mode"] | "");
+      if (m < 0) { publishAck(command, false, "Mode tak dikenal (manual/jadwal/auto)"); }
+      else {
+        applyFeedMode(m); saveSettings(); publishDeviceStatus(true);
+        publishAck(command, true, String("Mode pakan: ") + feedModeStr());
+      }
     }
     else if (strcmp(command, "tare") == 0) {
       const char* st = doc["scale_type"] | "all";
@@ -943,6 +969,10 @@ void onMqttMessage(const String& topic, const String& payload, const size_t size
         scheduleTriggeredToday[idx] = false;
         changed = true;
       }
+    }
+    if (doc.containsKey("feed_mode")) {
+      int m = parseFeedMode(doc["feed_mode"] | "");
+      if (m >= 0) { applyFeedMode(m); changed = true; }
     }
     if (changed) {
       saveSettings();
@@ -1040,6 +1070,7 @@ void publishDeviceStatus(bool forcePublish) {
   payload += "\"mqtt_connected\":"        + String(mqttReady() ? "true" : "false")        + ",";
   payload += "\"rtc_ok\":"               + String(rtcReady ? "true" : "false")            + ",";
   payload += "\"auto_feed_enabled\":"    + String(autoFeedEnabled ? "true" : "false")     + ",";
+  payload += "\"feed_mode\":\""          + String(feedModeStr())                          + "\",";
   payload += "\"feeding_in_progress\":"  + String(feedingInProgress ? "true" : "false")   + ",";
   payload += "\"screen\":\""             + screenName()                                   + "\",";
   payload += "\"main_menu_index\":"      + String(mainMenuIndex)                          + ",";
@@ -1127,6 +1158,20 @@ void publishFeedSessionStart(String sid, String sname, float total, int batches)
   p += "\"max_batch_g\":"       + String(MAX_BATCH_GRAM, 2);
   p += "}";
   mqttPublish(TOPIC_FEED_SESSION, p);
+}
+
+// Telemetri LIVE saat penimbangan (throttle ~350ms) → dashboard lihat timbangan berjalan.
+void publishFeedProgress(int batchNo, int totalBatches, float targetG, float currentG) {
+  static unsigned long lastProg = 0;
+  if (millis() - lastProg < 350) return;
+  lastProg = millis();
+  String p = "{\"device_id\":\"" + String(DEVICE_ID)
+    + "\",\"batch_no\":"     + String(batchNo)
+    + ",\"total_batches\":"  + String(totalBatches)
+    + ",\"target_g\":"       + String(targetG, 1)
+    + ",\"current_g\":"      + String(currentG, 1)
+    + ",\"feeding\":true}";
+  mqttPublish(TOPIC_FEED_PROGRESS, p);
 }
 
 void publishFeedBatch(String sid, int bn, int tb, float tg, float ag, bool ok) {
@@ -1273,7 +1318,7 @@ bool isSafeToAutoFeedNow() {
 }
 
 void checkAutoSchedule() {
-  if (!rtcReady || !autoFeedEnabled || !isSafeToAutoFeedNow()) return;
+  if (!rtcReady || feedMode == 0 || !isSafeToAutoFeedNow()) return;   // MANUAL → tak ada pakan terjadwal
   resetScheduleDailyFlagsIfNeeded();
   DateTime now = rtc.now();
 
@@ -1286,6 +1331,8 @@ void checkAutoSchedule() {
         lcd.clear(); lcdLine(0,"AUTO FEED BATAL"); lcdLine(1,"Belum sampling");
         delay(1500); lcd.clear(); return;
       }
+      if (feedMode == 2 && sampleAverageGram > 0)        // AUTO: rate ikut sampling terbaru
+        feedingRatePercent = recommendedFeedingRatePercent(sampleAverageGram);
       float target = calculateFeedPerScheduleGram();
       if (target <= 0.0) { setError("TARGET_ZERO", "Auto feed batal: target nol"); return; }
       lcd.clear(); lcdLine(0,"AUTO FEED"); lcdLine(1,"Target:" + String(target,0) + "g");
@@ -1744,6 +1791,7 @@ bool runSingleBatch(float targetGram, int batchIndex, int batchNo, int totalBatc
       lastLCD = millis();
       lcdLine(0, "FILL B:" + String(batchNo) + "/" + String(totalBatches));
       lcdLine(1, formatGram(gram) + "g T:" + String(targetGram,0));
+      publishFeedProgress(batchNo, totalBatches, targetGram, gram);  // live ke dashboard
     }
   }
 
@@ -2171,9 +2219,10 @@ void handleFeedMenu() {
   if (backPressed()) { currentScreen = SCREEN_MAIN_MENU; lcd.clear(); publishDeviceStatus(true); return; }
   if (okPressed()) {
     if (feedMenuIndex == 0) {
-      autoFeedEnabled = !autoFeedEnabled; saveSettings();
-      lcd.clear(); lcdLine(0,"Auto Feed"); lcdLine(1, autoFeedEnabled ? "ON" : "OFF");
-      delay(900); lcd.clear(); publishDeviceStatus(true);
+      applyFeedMode((feedMode + 1) % 3); saveSettings();   // cycle Manual→Jadwal→Auto
+      lcd.clear(); lcdLine(0,"Mode Pakan");
+      lcdLine(1, feedMode == 0 ? "MANUAL" : (feedMode == 1 ? "JADWAL" : "AUTO"));
+      delay(1000); lcd.clear(); publishDeviceStatus(true);
     } else if (feedMenuIndex == 1) {
       if (!sampleReady) {
         lcd.clear(); lcdLine(0,"Manual gagal"); lcdLine(1,"Sampling dulu"); delay(1200); lcd.clear();

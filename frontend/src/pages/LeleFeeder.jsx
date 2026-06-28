@@ -17,9 +17,11 @@ import RiwayatAkhirPanel    from '../components/lele/RiwayatAkhirPanel';
 import PengaturanPanel      from '../components/lele/PengaturanPanel';
 import ManualModePanel      from '../components/lele/ManualModePanel';
 import MqttMonitorPanel     from '../components/lele/MqttMonitorPanel';
+import FeedControlSyncPanel from '../components/lele/FeedControlSyncPanel';
 
 const PANELS = [
   { id: 'status',    label: 'Status Sistem',    icon: Activity },
+  { id: 'feedctl',   label: 'Kontrol Pakan',    icon: Sliders },
   { id: 'feeding',   label: 'Pakan Otomatis',   icon: Utensils },
   { id: 'biomass',   label: 'Timbang Biomassa', icon: Scale },
   { id: 'pond',      label: 'Data Kolam',       icon: Database },
@@ -200,6 +202,7 @@ export default function LeleFeeder() {
                   </div>
 
                   {tab === 'status'    && <StatusSistemPanel device={device} onAssign={() => setShowAssign(true)} />}
+                  {tab === 'feedctl'   && <FeedControlSyncPanel device={device} />}
                   {tab === 'feeding'   && <PakanOtomatisPanel device={device} />}
                   {tab === 'biomass'   && <TimbangBiomassaPanel device={device} />}
                   {tab === 'pond'      && <DataKolamPanel device={device} />}

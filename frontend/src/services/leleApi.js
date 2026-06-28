@@ -27,6 +27,9 @@ export const remoteFeedGram = (id, target_g) =>
   req(`/devices/${id}/control/feed-gram`, { method: 'POST', body: { target_g } });
 export const remoteAutoFeed = (id, enabled) =>
   req(`/devices/${id}/control/auto-feed`, { method: 'POST', body: { enabled } });
+export const setFeedMode = (id, mode) =>
+  req(`/devices/${id}/control/feed-mode`, { method: 'POST', body: { mode } });
+export const getFeedProgress = (id) => req(`/devices/${id}/feed-progress`);
 export const remoteTare = (id, scale_type) =>
   req(`/devices/${id}/control/tare`, { method: 'POST', body: { scale_type } });
 export const remoteResetSamples = (id) =>
