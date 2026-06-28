@@ -29,8 +29,13 @@ skema ber-OTA + firmware berisi klien OTA. Sesudah itu semua update cukup OTA.
 Checkpoint saat build: pastikan **ukuran firmware muat** di slot (skema mis. "Minimal
 SPIFFS 1.9MB APP with OTA" / "1.2MB×2").
 
+## Status: Fase 1–4 SELESAI ✅
+Firmware klien OTA + backend katalog/trigger/manifest + dashboard Firmware +
+rollout canary/audit sudah ter-commit. Tersisa: bootstrap reflash dual-OTA
+(sekali) lalu uji nyata di server.
+
 ## Fase pembangunan
-**Fase 1 — Firmware klien OTA**
+**Fase 1 — Firmware klien OTA** ✅
 - `FIRMWARE_VERSION` + kirim di payload status; subscribe topik `ota`.
 - HTTPS-OTA (`HTTPUpdate`/`esp_https_ota`) + verifikasi sha256 + validasi cert (root CA).
 - Health-confirm + rollback; lapor progress (downloading%/success/fail) via MQTT.
