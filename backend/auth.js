@@ -25,8 +25,12 @@ function issueSession(res, u) {
   res.cookie('rt', signRefresh(u), cookieOpts(REFRESH_MS));
 }
 
-// Path yang boleh diakses tanpa login.
-const OPEN_PATHS = [/^\/api\/auth\//, /^\/api\/quick-login/, /^\/api\/health$/, /^\/health$/];
+// Path yang boleh diakses tanpa login (termasuk endpoint OTA yang diakses device).
+const OPEN_PATHS = [
+  /^\/api\/auth\//, /^\/api\/quick-login/, /^\/api\/health$/, /^\/health$/,
+  /^\/api\/lele\/firmware\/latest/,      // self-check device
+  /^\/api\/lele\/firmware\/download\//,  // unduh .bin oleh device
+];
 
 // Gerbang global: semua /api/ wajib login (kecuali OPEN_PATHS). Set req.auth.
 function authGate(req, res, next) {

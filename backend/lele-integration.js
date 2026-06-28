@@ -13,6 +13,7 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
   mqttClient.subscribe('lele/feed/progress');   // telemetri live penimbangan
   mqttClient.subscribe('lele/device/error');
   mqttClient.subscribe('lele/device/ack');
+  mqttClient.subscribe('lele/device/ota_status');   // progres OTA dari device
 
   console.log('✓ Lele V3.2 MQTT handlers subscribed');
 
@@ -158,6 +159,20 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
             );
           }
         }
+
+        if (payload.firmware_version) {
+          await pool.query(`UPDATE lele_devices SET firmware_version = $2 WHERE device_id = $1`,
+            [deviceId, payload.firmware_version]);
+        }
+      }
+
+      else if (topic === 'lele/device/ota_status') {
+        await pool.query(
+          `UPDATE lele_devices SET ota_state=$2, ota_progress=$3, ota_target_version=$4, ota_at=NOW()
+           WHERE device_id=$1`,
+          [deviceId, payload.state || null,
+           payload.progress != null ? payload.progress : null,
+           payload.target_version || null]);
       }
 
       else if (topic === 'lele/biomass/sample') {
