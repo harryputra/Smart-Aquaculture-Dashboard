@@ -18,6 +18,27 @@ function registerLeleOtaHandlers({ app, pool, mqttClient }) {
   const upload = multer({ dest: DIR, limits: { fileSize: 8 * 1024 * 1024 } });   // maks 8 MB
   const fileUrl = (id) => `${PUBLIC_BASE}/api/lele/firmware/download/${id}`;
 
+  async function otaLog(device_id, event, fromV, toV, byUser, detail) {
+    await pool.query(
+      `INSERT INTO lele_ota_log (device_id, event, from_version, to_version, by_user, detail) VALUES ($1,$2,$3,$4,$5,$6)`,
+      [device_id, event, fromV || null, toV || null, byUser || null, detail || null]).catch(() => {});
+  }
+  const fwById = async (id) => (id
+    ? (await pool.query(`SELECT * FROM lele_firmware WHERE id = $1`, [id])).rows[0]
+    : (await pool.query(`SELECT * FROM lele_firmware WHERE is_latest = TRUE ORDER BY created_at DESC LIMIT 1`)).rows[0]);
+
+  async function triggerToDevice(deviceId, fw, byUser) {
+    const manifest = { version: fw.version, url: fileUrl(fw.id), sha256: fw.sha256 };
+    mqttClient.publish(`lele/device/${deviceId}/ota`, JSON.stringify(manifest));
+    const cur = (await pool.query(`SELECT firmware_version FROM lele_devices WHERE device_id=$1`, [deviceId])).rows[0];
+    await pool.query(
+      `UPDATE lele_devices SET ota_state='triggered', ota_target_version=$2, ota_progress=0, ota_at=NOW() WHERE device_id=$1`,
+      [deviceId, fw.version]);
+    await otaLog(deviceId, 'trigger', cur?.firmware_version, fw.version, byUser, null);
+    console.log(`📤 OTA → ${deviceId}: v${fw.version}`);
+    return manifest;
+  }
+
   // Hanya Pemilik/Superadmin boleh kelola firmware & memicu OTA.
   const requireOwner = (req, res, next) => {
     const role = req.auth?.role;
@@ -79,21 +100,83 @@ function registerLeleOtaHandlers({ app, pool, mqttClient }) {
   app.post('/api/lele/devices/:deviceId/ota', requireOwner, async (req, res) => {
     try {
       if (!PUBLIC_BASE) return res.status(500).json({ error: 'OTA_PUBLIC_BASE belum diset di server.' });
-      const fwId = req.body?.firmware_id;
-      const fw = fwId
-        ? (await pool.query(`SELECT * FROM lele_firmware WHERE id = $1`, [fwId])).rows[0]
-        : (await pool.query(`SELECT * FROM lele_firmware WHERE is_latest = TRUE ORDER BY created_at DESC LIMIT 1`)).rows[0];
+      const fw = await fwById(req.body?.firmware_id);
       if (!fw) return res.status(404).json({ error: 'Firmware tidak ditemukan.' });
-
-      const manifest = { version: fw.version, url: fileUrl(fw.id), sha256: fw.sha256 };
-      mqttClient.publish(`lele/device/${req.params.deviceId}/ota`, JSON.stringify(manifest));
-      await pool.query(
-        `UPDATE lele_devices SET ota_state='triggered', ota_target_version=$2, ota_progress=0, ota_at=NOW() WHERE device_id=$1`,
-        [req.params.deviceId, fw.version]);
-      console.log(`📤 OTA → ${req.params.deviceId}: v${fw.version}`);
+      const manifest = await triggerToDevice(req.params.deviceId, fw, req.auth?.uid);
       res.json({ success: true, manifest });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
+
+  // ---------------- Rollout canary + audit ----------------
+  app.post('/api/lele/ota/rollout', requireOwner, async (req, res) => {
+    try {
+      if (!PUBLIC_BASE) return res.status(500).json({ error: 'OTA_PUBLIC_BASE belum diset di server.' });
+      const ids = Array.isArray(req.body?.device_ids) ? req.body.device_ids.filter(Boolean) : [];
+      if (!ids.length) return res.status(400).json({ error: 'device_ids wajib (minimal 1).' });
+      const fw = await fwById(req.body?.firmware_id);
+      if (!fw) return res.status(404).json({ error: 'Firmware tidak ditemukan.' });
+      const canary = ids[0];
+      const remaining = ids.slice(1);
+      const r = await pool.query(
+        `INSERT INTO lele_ota_rollout (firmware_id, version, status, canary_device_id, remaining, created_by)
+         VALUES ($1,$2,'canary',$3,$4,$5) RETURNING *`,
+        [fw.id, fw.version, canary, JSON.stringify(remaining), req.auth?.uid || null]);
+      await triggerToDevice(canary, fw, req.auth?.uid);
+      await otaLog(canary, 'canary_start', null, fw.version, req.auth?.uid, `rollout #${r.rows[0].id} · sisa ${remaining.length}`);
+      res.json(r.rows[0]);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get('/api/lele/ota/rollouts', async (req, res) => {
+    try {
+      const r = await pool.query(`SELECT * FROM lele_ota_rollout ORDER BY created_at DESC LIMIT 20`);
+      res.json(r.rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/lele/ota/rollout/:id/abort', requireOwner, async (req, res) => {
+    try {
+      await pool.query(`UPDATE lele_ota_rollout SET status='aborted', updated_at=NOW() WHERE id=$1 AND status='canary'`, [req.params.id]);
+      res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get('/api/lele/ota/log', async (req, res) => {
+    try {
+      const dev = req.query.device;
+      const r = dev
+        ? await pool.query(`SELECT * FROM lele_ota_log WHERE device_id=$1 ORDER BY created_at DESC LIMIT 100`, [dev])
+        : await pool.query(`SELECT * FROM lele_ota_log ORDER BY created_at DESC LIMIT 100`);
+      res.json(r.rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Tick: majukan rollout canary (uji 1 → sehat → sebar; gagal/timeout → batal).
+  async function tickRollouts() {
+    const rs = await pool.query(`SELECT * FROM lele_ota_rollout WHERE status='canary'`);
+    for (const ro of rs.rows) {
+      const dev = (await pool.query(
+        `SELECT firmware_version, is_online, ota_state FROM lele_devices WHERE device_id=$1`, [ro.canary_device_id])).rows[0];
+      if (!dev) continue;
+      const remaining = Array.isArray(ro.remaining) ? ro.remaining : [];
+      if (dev.firmware_version === ro.version && dev.is_online) {
+        const fw = await fwById(ro.firmware_id);
+        if (fw) for (const d of remaining) await triggerToDevice(d, fw, ro.created_by);
+        await pool.query(`UPDATE lele_ota_rollout SET status='done', updated_at=NOW() WHERE id=$1`, [ro.id]);
+        await otaLog(ro.canary_device_id, 'canary_ok', null, ro.version, ro.created_by, `canary sehat → sebar ${remaining.length} device`);
+      } else if (dev.ota_state === 'fail') {
+        await pool.query(`UPDATE lele_ota_rollout SET status='aborted', updated_at=NOW() WHERE id=$1`, [ro.id]);
+        await otaLog(ro.canary_device_id, 'canary_fail', null, ro.version, ro.created_by, 'canary gagal → rollout dibatalkan');
+      } else {
+        const ageMin = (Date.now() - new Date(ro.created_at).getTime()) / 60000;
+        if (ageMin > 15) {
+          await pool.query(`UPDATE lele_ota_rollout SET status='aborted', updated_at=NOW() WHERE id=$1`, [ro.id]);
+          await otaLog(ro.canary_device_id, 'canary_timeout', null, ro.version, ro.created_by, 'canary tak konfirmasi 15 mnt (mungkin rollback)');
+        }
+      }
+    }
+  }
+  setInterval(() => tickRollouts().catch(() => {}), 10000);
 
   // ---------------- Publik (device) ----------------
   // Self-check manifest terbaru.

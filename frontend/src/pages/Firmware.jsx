@@ -1,9 +1,11 @@
 import { useEffect, useState, useRef } from 'react';
 import {
   Cpu, UploadCloud, Trash2, Star, Wifi, WifiOff, ArrowUpCircle, CheckCircle, XCircle, Loader,
+  Rocket, History, Octagon,
 } from 'lucide-react';
 import {
   getFirmwareList, uploadFirmware, deleteFirmware, setLatestFirmware, triggerOta, getLeleDevices,
+  createRollout, getRollouts, abortRollout, getOtaLog,
 } from '../services/leleApi';
 import { useCan } from '../context/AuthContext';
 
@@ -15,6 +17,8 @@ export default function Firmware() {
   const canOta = role === 'pemilik' || role === 'superadmin';
   const [firmwares, setFirmwares] = useState([]);
   const [devices, setDevices] = useState([]);
+  const [rollouts, setRollouts] = useState([]);
+  const [log, setLog] = useState([]);
   const [targetId, setTargetId] = useState('');
   const [busy, setBusy] = useState(false);
   const fileRef = useRef(null);
@@ -27,10 +31,13 @@ export default function Firmware() {
       if (!targetId) { const latest = fw.find(f => f.is_latest) || fw[0]; if (latest) setTargetId(String(latest.id)); }
     } catch (e) { /* mungkin bukan Pemilik */ }
   }
-  async function loadDevices() {
-    try { setDevices(await getLeleDevices()); } catch (e) { /* */ }
+  async function loadDyn() {
+    try {
+      const [d, ro, lg] = await Promise.all([getLeleDevices(), getRollouts().catch(() => []), getOtaLog().catch(() => [])]);
+      setDevices(d); setRollouts(ro); setLog(lg);
+    } catch (e) { /* */ }
   }
-  useEffect(() => { loadFw(); loadDevices(); const t = setInterval(loadDevices, 2500); return () => clearInterval(t); }, []);
+  useEffect(() => { loadFw(); loadDyn(); const t = setInterval(loadDyn, 2500); return () => clearInterval(t); }, []);
 
   const target = firmwares.find(f => String(f.id) === String(targetId));
 
@@ -51,17 +58,21 @@ export default function Firmware() {
   async function update(deviceId) {
     if (!target) return alert('Pilih firmware target dulu.');
     if (!confirm(`Kirim update ke "${deviceId}" → v${target.version}?`)) return;
-    try { await triggerOta(deviceId, target.id); loadDevices(); }
+    try { await triggerOta(deviceId, target.id); loadDyn(); }
     catch (e) { alert('Gagal: ' + e.message); }
   }
-  async function updateAllDiff() {
-    if (!target) return;
-    const targets = devices.filter(d => d.is_online && d.firmware_version !== target.version);
-    if (!targets.length) return alert('Semua device online sudah di versi target.');
-    if (!confirm(`Kirim update v${target.version} ke ${targets.length} device (yang online & beda versi)?\n\nCatatan: ini mengirim ke semua sekaligus. Untuk uji 1 dulu (canary), gunakan tombol per-device.`)) return;
+  async function rolloutCanary() {
+    if (!target) return alert('Pilih firmware target dulu.');
+    const ids = devices.filter(d => d.is_online && d.firmware_version !== target.version).map(d => d.device_id);
+    if (!ids.length) return alert('Semua device online sudah di versi target.');
+    if (!confirm(`Rollout CANARY → v${target.version}\n\nUji 1 device dulu (${ids[0]}). Bila sehat di versi baru, sistem OTOMATIS sebar ke ${ids.length - 1} device lainnya. Bila gagal/timeout → dibatalkan.\n\nLanjut?`)) return;
     setBusy(true);
-    try { for (const d of targets) { await triggerOta(d.device_id, target.id); } loadDevices(); }
+    try { await createRollout(target.id, ids); loadDyn(); }
     catch (e) { alert('Gagal: ' + e.message); } finally { setBusy(false); }
+  }
+  async function abort(id) {
+    if (!confirm('Batalkan rollout ini?')) return;
+    try { await abortRollout(id); loadDyn(); } catch (e) { alert('Gagal: ' + e.message); }
   }
 
   return (
@@ -123,6 +134,18 @@ export default function Firmware() {
         </div>
       </div>
 
+      {/* Rollout canary aktif */}
+      {rollouts.filter(r => r.status === 'canary').map(r => (
+        <div key={r.id} className="alert alert-info mb-6" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div>
+            <Rocket size={16} style={{ verticalAlign: '-2px' }} /> <strong>Rollout #{r.id} → v{r.version}</strong> —
+            uji canary di <code>{r.canary_device_id}</code>, menunggu konfirmasi sehat…
+            {' '}lalu sebar ke {Array.isArray(r.remaining) ? r.remaining.length : 0} device.
+          </div>
+          {canOta && <button className="btn btn-sm btn-secondary" onClick={() => abort(r.id)}><Octagon size={13} /> Batalkan</button>}
+        </div>
+      ))}
+
       {/* Matriks versi per device + update */}
       <div className="card">
         <div className="card-header">
@@ -133,8 +156,9 @@ export default function Firmware() {
               <select className="form-select" style={{ width: 'auto' }} value={targetId} onChange={e => setTargetId(e.target.value)}>
                 {firmwares.map(f => <option key={f.id} value={f.id}>v{f.version}{f.is_latest ? ' (latest)' : ''}</option>)}
               </select>
-              <button className="btn btn-sm btn-secondary" disabled={busy || !target} onClick={updateAllDiff}>
-                <ArrowUpCircle size={14} /> Update semua (beda versi)
+              <button className="btn btn-sm btn-primary" disabled={busy || !target} onClick={rolloutCanary}
+                title="Uji 1 device dulu, bila sehat otomatis sebar ke sisanya">
+                <Rocket size={14} /> Rollout Canary
               </button>
             </div>
           )}
@@ -166,8 +190,44 @@ export default function Firmware() {
           </table>
         </div>
       </div>
+
+      {/* Riwayat / audit OTA */}
+      <div className="card mt-6">
+        <div className="card-header"><div className="card-title"><History size={18} /> Riwayat OTA</div></div>
+        <div style={{ overflowX: 'auto', maxHeight: 320 }}>
+          <table className="data-table" style={{ width: '100%' }}>
+            <thead><tr><th>Waktu</th><th>Device</th><th>Event</th><th>Versi</th><th>Catatan</th></tr></thead>
+            <tbody>
+              {log.length === 0 && <tr><td colSpan={5} className="text-muted" style={{ textAlign: 'center', padding: 16 }}>Belum ada riwayat.</td></tr>}
+              {log.map(l => (
+                <tr key={l.id}>
+                  <td className="text-xs">{fdt(l.created_at)}</td>
+                  <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{l.device_id}</td>
+                  <td><EventBadge ev={l.event} /></td>
+                  <td className="text-xs">{l.from_version ? `${l.from_version} → ` : ''}{l.to_version || '-'}</td>
+                  <td className="text-xs text-muted">{l.detail || ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
+}
+
+function EventBadge({ ev }) {
+  const map = {
+    trigger: { t: 'dikirim', bg: '#dbeafe', c: '#1d4ed8' },
+    canary_start: { t: 'canary mulai', bg: '#ede9fe', c: '#6d28d9' },
+    canary_ok: { t: 'canary sehat → sebar', bg: '#d1fae5', c: '#047857' },
+    canary_fail: { t: 'canary gagal', bg: '#fee2e2', c: '#b91c1c' },
+    canary_timeout: { t: 'canary timeout', bg: '#fef3c7', c: '#92400e' },
+    success: { t: 'sukses', bg: '#d1fae5', c: '#047857' },
+    fail: { t: 'gagal', bg: '#fee2e2', c: '#b91c1c' },
+  };
+  const m = map[ev] || { t: ev, bg: '#f3f4f6', c: '#374151' };
+  return <span className="badge" style={{ background: m.bg, color: m.c }}>{m.t}</span>;
 }
 
 function OtaCell({ d }) {

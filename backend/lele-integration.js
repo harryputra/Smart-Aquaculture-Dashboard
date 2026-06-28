@@ -173,6 +173,11 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
           [deviceId, payload.state || null,
            payload.progress != null ? payload.progress : null,
            payload.target_version || null]);
+        if (payload.state === 'success' || payload.state === 'fail') {
+          await pool.query(
+            `INSERT INTO lele_ota_log (device_id, event, to_version, detail) VALUES ($1,$2,$3,$4)`,
+            [deviceId, payload.state, payload.target_version || null, payload.detail || null]).catch(() => {});
+        }
       }
 
       else if (topic === 'lele/biomass/sample') {

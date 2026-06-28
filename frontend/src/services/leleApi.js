@@ -90,6 +90,12 @@ export const setLatestFirmware = (id) => req(`/firmware/${id}/latest`, { method:
 export const triggerOta = (deviceId, firmware_id) =>
   req(`/devices/${deviceId}/ota`, { method: 'POST', body: firmware_id ? { firmware_id } : {} });
 
+export const getRollouts = () => req('/ota/rollouts');
+export const createRollout = (firmware_id, device_ids) =>
+  req('/ota/rollout', { method: 'POST', body: { firmware_id, device_ids } });
+export const abortRollout = (id) => req(`/ota/rollout/${id}/abort`, { method: 'POST' });
+export const getOtaLog = (device) => req('/ota/log' + (device ? `?device=${encodeURIComponent(device)}` : ''));
+
 export async function uploadFirmware({ file, model, version, notes }) {
   const fd = new FormData();
   fd.append('file', file);
