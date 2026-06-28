@@ -36,6 +36,19 @@ export const testSpread = (id, seconds) =>
   req(`/devices/${id}/control/test-spread`, { method: 'POST', body: { seconds } });
 export const setServoOpen = (id, data) =>
   req(`/devices/${id}/control/servo`, { method: 'POST', body: data });
+
+// Uji hardware (commissioning)
+export const testSpinner = (id, opts) =>
+  req(`/devices/${id}/control/test-spread`, { method: 'POST', body: opts });
+export const testServoAct = (id, action) =>
+  req(`/devices/${id}/control/test-servo`, { method: 'POST', body: { action } });
+export const testAuger = (id, seconds, dir) =>
+  req(`/devices/${id}/control/test-auger`, { method: 'POST', body: { seconds, dir } });
+export const stopDevice = (id) =>
+  req(`/devices/${id}/control/stop`, { method: 'POST' });
+export const getCommissioning = (id) => req(`/devices/${id}/commissioning`);
+export const saveCommissioning = (id, data) =>
+  req(`/devices/${id}/commissioning`, { method: 'POST', body: data });
 export const remoteTare = (id, scale_type) =>
   req(`/devices/${id}/control/tare`, { method: 'POST', body: { scale_type } });
 export const remoteResetSamples = (id) =>

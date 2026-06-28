@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Routes, Route, NavLink, Link, useLocation } from 'react-router-dom';
 import {
   Home, Fish, Activity, BarChart3, Bell, Waves,
-  Skull, Utensils, Settings, LayoutGrid, Cpu, Menu, X, Radio,
+  Skull, Utensils, Settings, LayoutGrid, Cpu, Menu, X, Radio, Wrench,
 } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import Farms from './pages/Farms';
@@ -13,6 +13,7 @@ import GrafanaView from './pages/GrafanaView';
 import Notifications from './pages/Notifications';
 import LeleFeeder from './pages/LeleFeeder';
 import MqttMonitor from './pages/MqttMonitor';
+import HardwareTest from './pages/HardwareTest';
 import NotificationToasts from './components/NotificationToasts';
 import { getUnreadCount } from './services/api';
 
@@ -89,6 +90,9 @@ export default function App() {
           <NavLink to="/mqtt-monitor" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
             <Radio size={18} /> <span>MQTT Monitor</span>
           </NavLink>
+          <NavLink to="/hardware-test" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
+            <Wrench size={18} /> <span>Uji Hardware</span>
+          </NavLink>
         </div>
 
         <div className="sidebar-section">
@@ -113,6 +117,7 @@ export default function App() {
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/lele-feeder" element={<LeleFeeder />} />
           <Route path="/mqtt-monitor" element={<MqttMonitor />} />
+          <Route path="/hardware-test" element={<HardwareTest />} />
         </Routes>
       </main>
     </div>

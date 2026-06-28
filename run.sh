@@ -199,6 +199,7 @@ MIGRATIONS=(
   database/migration-v3-2-3-schedfix.sql
   database/migration-lele-traffic.sql
   database/migration-budidaya.sql
+  database/migration-commissioning.sql
 )
 apply_migrations() {
   load_env

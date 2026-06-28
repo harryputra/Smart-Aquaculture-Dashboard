@@ -356,6 +356,9 @@ enum RemoteCmd {
   CMD_START_SAMPLING,
   CMD_AUTO_GEN_SCHEDULE,
   CMD_TEST_SPREAD,
+  CMD_TEST_SERVO,
+  CMD_TEST_AUGER,
+  CMD_STOP_ALL,
   CMD_BTN_UP,
   CMD_BTN_DOWN,
   CMD_BTN_OK,
@@ -511,7 +514,9 @@ String screenName();
 // V3.2.1: spinner PWM
 void setupSpinnerPWM();
 void spinnerUpdatePWM(int idx, uint8_t duty);
-void runTestSpread(int seconds);
+void runTestSpread(int seconds, int pwm, int dir);
+void runTestServo(String action);
+void runTestAuger(int seconds, bool reverse);
 uint8_t spinnerPWMForDispense(float chamberGramCurrent, float batchTargetGram);
 
 // =====================================================
@@ -932,8 +937,24 @@ void onMqttMessage(const String& topic, const String& payload, const size_t size
     else if (strcmp(command, "start_sampling")   == 0) { pendingCmd.cmd = CMD_START_SAMPLING;   publishAck(command, true, "Sampling started"); }
     else if (strcmp(command, "auto_gen_schedule")== 0) { pendingCmd.cmd = CMD_AUTO_GEN_SCHEDULE; publishAck(command, true, "Schedule auto-gen queued"); }
     else if (strcmp(command, "test_spread") == 0) {
-      pendingCmd.cmd = CMD_TEST_SPREAD; pendingCmd.intArg = doc["seconds"] | 5;
+      pendingCmd.cmd = CMD_TEST_SPREAD;
+      pendingCmd.intArg   = doc["seconds"] | 5;
+      pendingCmd.floatArg = doc["pwm"] | 0;
+      pendingCmd.stringArg = String((int)(doc["dir"] | 0));
       publishAck(command, true, "Test sebar queued");
+    }
+    else if (strcmp(command, "test_servo") == 0) {
+      pendingCmd.cmd = CMD_TEST_SERVO; pendingCmd.stringArg = doc["action"] | "sweep";
+      publishAck(command, true, "Test servo queued");
+    }
+    else if (strcmp(command, "test_auger") == 0) {
+      pendingCmd.cmd = CMD_TEST_AUGER; pendingCmd.intArg = doc["seconds"] | 3;
+      pendingCmd.stringArg = doc["dir"] | "maju";
+      publishAck(command, true, "Test auger queued");
+    }
+    else if (strcmp(command, "stop_all") == 0) {
+      stopAllActuators();
+      publishAck(command, true, "Semua aktuator dihentikan");
     }
     else if (strcmp(command, "open_valve")       == 0) { pendingCmd.cmd = CMD_OPEN_VALVE;       publishAck(command, true, "Servo open"); }
     else if (strcmp(command, "close_valve")      == 0) { pendingCmd.cmd = CMD_CLOSE_VALVE;      publishAck(command, true, "Servo close"); }
@@ -1056,8 +1077,21 @@ void processPendingCommand() {
       lcd.clear(); lcdLine(0,"WEB: SCHEDULE"); lcdLine(1,"Auto-generated"); delay(1000); lcd.clear();
       break;
     case CMD_TEST_SPREAD:
-      runTestSpread(pendingCmd.intArg > 0 ? pendingCmd.intArg : 5);
+      runTestSpread(pendingCmd.intArg > 0 ? pendingCmd.intArg : 5, (int)pendingCmd.floatArg, pendingCmd.stringArg.toInt());
       currentScreen = SCREEN_MAIN_MENU; lcd.clear();
+      break;
+    case CMD_TEST_SERVO:
+      runTestServo(pendingCmd.stringArg);
+      currentScreen = SCREEN_MAIN_MENU; lcd.clear();
+      break;
+    case CMD_TEST_AUGER:
+      runTestAuger(pendingCmd.intArg > 0 ? pendingCmd.intArg : 3,
+                   pendingCmd.stringArg == "mundur" || pendingCmd.stringArg == "rev");
+      currentScreen = SCREEN_MAIN_MENU; lcd.clear();
+      break;
+    case CMD_STOP_ALL:
+      stopAllActuators();
+      lcd.clear(); lcdLine(0,"STOP DARURAT"); lcdLine(1,"Semua dimatikan"); delay(1000); lcd.clear();
       break;
     case CMD_OPEN_VALVE:
       servoOpen();
@@ -1714,14 +1748,16 @@ void stopAllActuators() {
   servoClose();
 }
 
-// Test sebar: putar spinner TANPA mengeluarkan pakan (kalibrasi sebaran).
-void runTestSpread(int seconds) {
+// Test sebar: putar spinner TANPA pakan. pwm 0 = pakai spinnerPwmHigh; dir 1=kanan,
+// 2=kiri, lainnya = ikut mode. Dipakai uji "pelan/kencang × kanan/kiri".
+void runTestSpread(int seconds, int pwm, int dir) {
   if (feedingInProgress) return;
   int s = constrain(seconds, 1, 15);
+  uint8_t p = (pwm >= 120 && pwm <= 255) ? (uint8_t)pwm : spinnerPwmHigh;
+  int d = (dir == 1 || dir == 2) ? dir : spinnerDirForBatch(0);
   servoClose();   // pastikan trapdoor tertutup (tak ada pakan keluar)
-  String dir = spinnerDirMode == 1 ? "KANAN" : (spinnerDirMode == 2 ? "KIRI" : "B-BALIK");
-  lcd.clear(); lcdLine(0, "TEST SEBAR " + dir); lcdLine(1, String(s) + "s PWM:" + String(spinnerPwmHigh));
-  spinnerDrive(0, spinnerPwmHigh);   // arah sesuai mode
+  lcd.clear(); lcdLine(0, String("TEST ") + (d == 1 ? "KANAN" : "KIRI")); lcdLine(1, String(s) + "s PWM:" + String(p));
+  if (d == 1) spinnerCWPWM(p); else spinnerCCWPWM(p);
   unsigned long t0 = millis();
   while (millis() - t0 < (unsigned long)s * 1000UL) {
     maintainNetwork();
@@ -1730,6 +1766,41 @@ void runTestSpread(int seconds) {
   }
   spinnerStop();
   lcd.clear(); lcdLine(0, "TEST SELESAI"); delay(800); lcd.clear();
+}
+
+// Test trapdoor servo: open / close / sweep (buka-tutup bertahap).
+void runTestServo(String action) {
+  if (feedingInProgress) return;
+  if (action == "open") {
+    lcd.clear(); lcdLine(0, "TEST SERVO"); lcdLine(1, "BUKA"); servoOpen(); delay(1200);
+  } else if (action == "close") {
+    lcd.clear(); lcdLine(0, "TEST SERVO"); lcdLine(1, "TUTUP"); servoClose(); delay(1200);
+  } else {  // sweep: buka bertahap lalu tutup bertahap
+    lcd.clear(); lcdLine(0, "TEST SERVO"); lcdLine(1, "SWEEP buka");
+    for (int a = SERVO_CLOSE_ANGLE; a <= SERVO_OPEN_ANGLE; a++) { servoWrite(a); maintainNetwork(); delay(120); }
+    delay(600);
+    lcdLine(1, "SWEEP tutup");
+    for (int a = SERVO_OPEN_ANGLE; a >= SERVO_CLOSE_ANGLE; a--) { servoWrite(a); maintainNetwork(); delay(120); }
+  }
+  servoClose();
+  lcd.clear(); lcdLine(0, "SERVO OK"); delay(700); lcd.clear();
+}
+
+// Test auger/stepper: jog maju/mundur beberapa detik (tanpa timbang).
+void runTestAuger(int seconds, bool reverse) {
+  if (feedingInProgress) return;
+  int s = constrain(seconds, 1, 8);
+  int dirLevel = reverse ? STEPPER_DIR_CCW : AUGER_FILL_DIR;
+  lcd.clear(); lcdLine(0, "TEST AUGER"); lcdLine(1, String(s) + "s " + (reverse ? "MUNDUR" : "MAJU"));
+  stepperEnable();
+  unsigned long t0 = millis();
+  while (millis() - t0 < (unsigned long)s * 1000UL) {
+    stepperRunBlock(dirLevel, 20, AUGER_FAST_DELAY_US);
+    maintainNetwork();
+    if (backPressed()) break;
+  }
+  stepperDisable();
+  lcd.clear(); lcdLine(0, "AUGER OK"); delay(700); lcd.clear();
 }
 
 // =====================================================
@@ -2321,7 +2392,7 @@ void handleFeedMenu() {
         }
       }
     } else if (feedMenuIndex == 2) {
-      runTestSpread(5);
+      runTestSpread(5, 0, -1);
     } else if (feedMenuIndex == 3) {
       currentScreen = SCREEN_FEED_TARGET_INFO; lcd.clear(); return;
     }

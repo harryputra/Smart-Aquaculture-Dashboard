@@ -439,11 +439,56 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
     res.json({ success: true, ...cfg });
   });
 
-  // Test sebar: putar spinner X detik tanpa pakan (kalibrasi).
+  // Test spinner: putar X detik tanpa pakan. Opsional pwm (120-255) & dir (1=kanan,2=kiri).
   app.post('/api/lele/devices/:deviceId/control/test-spread', (req, res) => {
-    const seconds = Math.max(1, Math.min(15, parseInt(req.body?.seconds) || 5));
-    sendCommand(req.params.deviceId, 'test_spread', { seconds });
-    res.json({ success: true, seconds });
+    const b = req.body || {};
+    const payload = { seconds: Math.max(1, Math.min(15, parseInt(b.seconds) || 5)) };
+    if (b.pwm != null) payload.pwm = Math.max(120, Math.min(255, parseInt(b.pwm)));
+    if (b.dir != null) { const d = parseInt(b.dir); if (d === 1 || d === 2) payload.dir = d; }
+    sendCommand(req.params.deviceId, 'test_spread', payload);
+    res.json({ success: true, ...payload });
+  });
+
+  // Test trapdoor servo: action = open | close | sweep.
+  app.post('/api/lele/devices/:deviceId/control/test-servo', (req, res) => {
+    const action = ['open', 'close', 'sweep'].includes(req.body?.action) ? req.body.action : 'sweep';
+    sendCommand(req.params.deviceId, 'test_servo', { action });
+    res.json({ success: true, action });
+  });
+
+  // Test auger/stepper: jog maju/mundur beberapa detik.
+  app.post('/api/lele/devices/:deviceId/control/test-auger', (req, res) => {
+    const seconds = Math.max(1, Math.min(8, parseInt(req.body?.seconds) || 3));
+    const dir = req.body?.dir === 'mundur' ? 'mundur' : 'maju';
+    sendCommand(req.params.deviceId, 'test_auger', { seconds, dir });
+    res.json({ success: true, seconds, dir });
+  });
+
+  // STOP DARURAT: hentikan semua aktuator.
+  app.post('/api/lele/devices/:deviceId/control/stop', (req, res) => {
+    sendCommand(req.params.deviceId, 'stop_all');
+    res.json({ success: true });
+  });
+
+  // ---- Laporan commissioning (hasil uji hardware) ----
+  app.get('/api/lele/devices/:deviceId/commissioning', async (req, res) => {
+    try {
+      const r = await pool.query(
+        `SELECT DISTINCT ON (test_key) test_key, result, note, tested_at
+         FROM lele_commissioning WHERE device_id=$1 ORDER BY test_key, tested_at DESC`,
+        [req.params.deviceId]);
+      res.json(r.rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+  app.post('/api/lele/devices/:deviceId/commissioning', async (req, res) => {
+    try {
+      const { test_key, result, note = null } = req.body || {};
+      if (!test_key || !['pass', 'fail'].includes(result)) return res.status(400).json({ error: 'test_key & result (pass|fail) wajib.' });
+      const r = await pool.query(
+        `INSERT INTO lele_commissioning (device_id, test_key, result, note) VALUES ($1,$2,$3,$4) RETURNING *`,
+        [req.params.deviceId, test_key, result, note]);
+      res.json(r.rows[0]);
+    } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
   // ============================
