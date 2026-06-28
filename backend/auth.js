@@ -19,6 +19,12 @@ const signAccess = (u) => jwt.sign({ uid: u.user_id, role: u.role, org: u.org_id
 const signRefresh = (u) => jwt.sign({ uid: u.user_id, typ: 'refresh' }, SECRET, { expiresIn: '7d' });
 const publicUser = (u) => u && { user_id: u.user_id, email: u.email, name: u.name, role: u.role, org_id: u.org_id };
 
+// Set cookie sesi (access + refresh). Dipakai login biasa & quick-login.
+function issueSession(res, u) {
+  res.cookie('at', signAccess(u), cookieOpts(ACCESS_MS));
+  res.cookie('rt', signRefresh(u), cookieOpts(REFRESH_MS));
+}
+
 // Path yang boleh diakses tanpa login.
 const OPEN_PATHS = [/^\/api\/auth\//, /^\/api\/quick-login/, /^\/api\/health$/, /^\/health$/];
 
@@ -96,8 +102,7 @@ function registerAuthHandlers({ app, pool }) {
       const u = await userByEmail(email);
       const ok = u && bcrypt.compareSync(password, u.password_hash);
       if (!ok) { audit('LOGIN_FAIL', { email, ip, ua }); return res.status(401).json({ error: 'Email atau password salah.' }); }
-      res.cookie('at', signAccess(u), cookieOpts(ACCESS_MS));
-      res.cookie('rt', signRefresh(u), cookieOpts(REFRESH_MS));
+      issueSession(res, u);
       pool.query(`UPDATE users SET last_login=NOW() WHERE user_id=$1`, [u.user_id]).catch(() => {});
       audit('LOGIN_OK', { userId: u.user_id, email: u.email, ip, ua });
       res.json({ user: publicUser(u) });
@@ -112,8 +117,7 @@ function registerAuthHandlers({ app, pool }) {
       if (p.typ !== 'refresh') throw new Error('typ');
       const u = await userById(p.uid);
       if (!u) return res.status(401).json({ error: 'User tidak aktif.' });
-      res.cookie('at', signAccess(u), cookieOpts(ACCESS_MS));
-      res.cookie('rt', signRefresh(u), cookieOpts(REFRESH_MS));
+      issueSession(res, u);
       res.json({ user: publicUser(u) });
     } catch { return res.status(401).json({ error: 'Sesi kedaluwarsa, silakan login ulang.' }); }
   });
@@ -159,4 +163,4 @@ async function ensureBootstrap(pool) {
   }
 }
 
-module.exports = { registerAuthHandlers, authGate, rolePolicy, ROLES };
+module.exports = { registerAuthHandlers, authGate, rolePolicy, issueSession, ROLES };

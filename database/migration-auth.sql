@@ -71,3 +71,6 @@ UPDATE farms SET org_id = 'org_default' WHERE org_id IS NULL;
 
 INSERT INTO quick_login_config (id, enabled) VALUES (1, FALSE)
 ON CONFLICT (id) DO NOTHING;
+
+-- Tandai akun yang boleh dipakai login cepat (hanya akun demo; akun nyata FALSE).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS quick_login BOOLEAN DEFAULT FALSE;

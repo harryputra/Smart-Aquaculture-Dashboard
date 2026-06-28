@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { authMe, authLogin, authLogout, authRefresh } from '../services/api';
+import { authMe, authLogin, authLogout, authRefresh, quickLoginPost } from '../services/api';
 
 const AuthCtx = createContext(null);
 export const useAuth = () => useContext(AuthCtx);
@@ -37,9 +37,14 @@ export function AuthProvider({ children }) {
     try { await authLogout(); } catch { /* ignore */ }
     setUser(null);
   };
+  const quickLogin = async (body) => {
+    const r = await quickLoginPost(body);
+    setUser(r.user);
+    return r.user;
+  };
 
   return (
-    <AuthCtx.Provider value={{ user, loading, login, logout, refresh: check }}>
+    <AuthCtx.Provider value={{ user, loading, login, logout, quickLogin, refresh: check }}>
       {children}
     </AuthCtx.Provider>
   );

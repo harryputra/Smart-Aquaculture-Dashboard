@@ -1,20 +1,32 @@
-import { useState } from 'react';
-import { Waves, LogIn, Eye, EyeOff } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
+import { useState, useEffect } from 'react';
+import { Waves, LogIn, Eye, EyeOff, Zap } from 'lucide-react';
+import { useAuth, ROLE_LABEL } from '../context/AuthContext';
+import { getQuickLoginPublic } from '../services/api';
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, quickLogin } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [ql, setQl] = useState(null);     // { show_button, passphrase_required, accounts }
+  const [qp, setQp] = useState('');
+
+  useEffect(() => { getQuickLoginPublic().then(setQl).catch(() => setQl(null)); }, []);
 
   async function submit(e) {
     e.preventDefault();
     setErr(''); setBusy(true);
     try { await login(email.trim(), password); }
     catch (e2) { setErr(e2.message || 'Login gagal. Coba lagi.'); }
+    finally { setBusy(false); }
+  }
+
+  async function doQuick(acc) {
+    setErr(''); setBusy(true);
+    try { await quickLogin({ account: acc.user_id, passphrase: qp }); }
+    catch (e2) { setErr(e2.message || 'Quick-login gagal.'); }
     finally { setBusy(false); }
   }
 
@@ -68,6 +80,26 @@ export default function Login() {
             <LogIn size={16} /> {busy ? 'Memproses…' : 'Masuk'}
           </button>
         </form>
+
+        {ql?.show_button && ql.accounts?.length > 0 && (
+          <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px dashed var(--border-primary)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 10 }}>
+              <Zap size={14} /> Quick Login (Demo)
+            </div>
+            {ql.passphrase_required && (
+              <input className="form-input" type="password" value={qp} onChange={e => setQp(e.target.value)}
+                placeholder="Passphrase quick-login" style={{ marginBottom: 8 }} />
+            )}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              {ql.accounts.map(a => (
+                <button key={a.user_id} type="button" className="btn btn-secondary btn-sm" disabled={busy}
+                  onClick={() => doQuick(a)} title={a.email}>
+                  {ROLE_LABEL[a.role] || a.role}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <p style={{ marginTop: 20, textAlign: 'center', fontSize: 11.5, color: 'var(--text-muted)' }}>
           © Smart Aquaculture · POLMAN Bandung

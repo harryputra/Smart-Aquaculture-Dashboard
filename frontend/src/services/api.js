@@ -35,6 +35,13 @@ export const createOrg = (data) => req('/orgs', { method: 'POST', body: data });
 export const updateOrg = (id, data) => req(`/orgs/${id}`, { method: 'PUT', body: data });
 export const deleteOrg = (id) => req(`/orgs/${id}`, { method: 'DELETE' });
 
+// Quick-Login
+export const getQuickLoginPublic = (token) =>
+  req('/quick-login/public' + (token ? `?token=${encodeURIComponent(token)}` : ''));
+export const quickLoginPost = (body) => req('/quick-login/login', { method: 'POST', body });
+export const getQuickLoginConfig = () => req('/admin/quick-login');
+export const setQuickLoginConfig = (body) => req('/admin/quick-login', { method: 'PUT', body });
+
 // Farms
 export const getFarms = () => req('/farms');
 export const getFarm = (id) => req(`/farms/${id}`);

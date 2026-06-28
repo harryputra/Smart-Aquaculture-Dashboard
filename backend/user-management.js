@@ -14,6 +14,7 @@ const strongPassword = (pw) =>
 const publicUser = (u) => ({
   user_id: u.user_id, org_id: u.org_id, org_name: u.org_name, email: u.email, name: u.name,
   role: u.role, is_active: u.is_active, last_login: u.last_login, created_at: u.created_at,
+  quick_login: u.quick_login,
 });
 
 function registerUserHandlers({ app, pool }) {
@@ -70,9 +71,10 @@ function registerUserHandlers({ app, pool }) {
 
       const user_id = 'usr_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
       const hash = bcrypt.hashSync(password.slice(0, 200), 10);
+      const quick = isSuper(req) ? !!req.body.quick_login : false;
       const r = await pool.query(
-        `INSERT INTO users (user_id, org_id, email, name, password_hash, role) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-        [user_id, org_id, email, name || email, hash, role]);
+        `INSERT INTO users (user_id, org_id, email, name, password_hash, role, quick_login) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+        [user_id, org_id, email, name || email, hash, role, quick]);
       res.json(publicUser(r.rows[0]));
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
@@ -101,6 +103,9 @@ function registerUserHandlers({ app, pool }) {
       if (req.body.password) {
         if (!strongPassword(req.body.password)) return res.status(400).json({ error: 'Password minimal 8 karakter, dengan huruf besar, kecil, dan angka.' });
         fields.push(`password_hash = $${i++}`); params.push(bcrypt.hashSync(String(req.body.password).slice(0, 200), 10));
+      }
+      if (isSuper(req) && req.body.quick_login != null) {
+        fields.push(`quick_login = $${i++}`); params.push(!!req.body.quick_login);
       }
       if (!fields.length) return res.status(400).json({ error: 'Tidak ada perubahan.' });
       params.push(req.params.id);

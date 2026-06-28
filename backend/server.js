@@ -940,6 +940,9 @@ registerAuthHandlers({ app, pool });
 const { registerUserHandlers } = require('./user-management');
 registerUserHandlers({ app, pool });
 
+const { registerQuickLoginHandlers } = require('./quick-login');
+registerQuickLoginHandlers({ app, pool });
+
 app.listen(PORT, () => {
   console.log(`🐟 Backend Smart Aquaculture berjalan di port ${PORT}`);
 });

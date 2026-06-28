@@ -17,6 +17,7 @@ import MqttMonitor from './pages/MqttMonitor';
 import HardwareTest from './pages/HardwareTest';
 import Devices from './pages/Devices';
 import Login from './pages/Login';
+import QuickLogin from './pages/QuickLogin';
 import Users from './pages/Users';
 import NotificationToasts from './components/NotificationToasts';
 import { getUnreadCount } from './services/api';
@@ -27,7 +28,14 @@ export default function App() {
   if (loading) {
     return <div className="loading" style={{ minHeight: '100vh' }}><div className="spinner" /></div>;
   }
-  if (!user) return <Login />;
+  if (!user) {
+    return (
+      <Routes>
+        <Route path="/q/:token" element={<QuickLogin />} />
+        <Route path="*" element={<Login />} />
+      </Routes>
+    );
+  }
   return <Shell />;
 }
 

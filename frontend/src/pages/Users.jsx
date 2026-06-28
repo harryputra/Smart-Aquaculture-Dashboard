@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Plus, Users as UsersIcon, Building2, Trash2, Pencil, X, Shield } from 'lucide-react';
+import { Plus, Users as UsersIcon, Building2, Trash2, Pencil, X, Shield, Zap, Copy } from 'lucide-react';
 import {
   getUsers, createUser, updateUser, deleteUser,
   getOrgs, createOrg, updateOrg, deleteOrg,
+  getQuickLoginConfig, setQuickLoginConfig,
 } from '../services/api';
 import { useAuth, useCan, ROLE_LABEL } from '../context/AuthContext';
 
@@ -13,7 +14,7 @@ const ROLE_BADGE = {
   pengamat: { bg: '#f3f4f6', c: '#374151' },
 };
 const fdt = (d) => (d ? new Date(d).toLocaleDateString('id-ID') : '-');
-const blankUser = { name: '', email: '', password: '', role: 'pekerja', org_id: '', is_active: true };
+const blankUser = { name: '', email: '', password: '', role: 'pekerja', org_id: '', is_active: true, quick_login: false };
 
 export default function Users() {
   const { user } = useAuth();
@@ -23,6 +24,7 @@ export default function Users() {
   const [filterOrg, setFilterOrg] = useState('');
   const [modal, setModal] = useState(null);   // { mode:'create'|'edit', data }
   const [newOrg, setNewOrg] = useState('');
+  const [qlCfg, setQlCfg] = useState(null);
 
   const roleOptions = isSuper ? ['superadmin', 'pemilik', 'pekerja', 'pengamat'] : ['pemilik', 'pekerja', 'pengamat'];
 
@@ -30,6 +32,7 @@ export default function Users() {
     try {
       const [u, o] = await Promise.all([getUsers(isSuper ? filterOrg : undefined), getOrgs().catch(() => [])]);
       setUsers(u); setOrgs(o);
+      if (isSuper) getQuickLoginConfig().then(setQlCfg).catch(() => {});
     } catch (e) { console.error(e); }
   }
   useEffect(() => { load(); }, [filterOrg]);
@@ -41,10 +44,12 @@ export default function Users() {
       if (modal.mode === 'create') {
         const body = { name: d.name, email: d.email, password: d.password, role: d.role };
         if (isSuper && d.role !== 'superadmin') body.org_id = d.org_id;
+        if (isSuper) body.quick_login = !!d.quick_login;
         await createUser(body);
       } else {
         const body = { name: d.name, role: d.role, is_active: d.is_active };
         if (d.password) body.password = d.password;
+        if (isSuper) body.quick_login = !!d.quick_login;
         await updateUser(d.user_id, body);
       }
       setModal(null); load();
@@ -104,6 +109,13 @@ export default function Users() {
             ))}
           </div>
         </div>
+      )}
+
+      {/* Quick-Login config — superadmin */}
+      {isSuper && qlCfg && (
+        <QuickLoginCard cfg={qlCfg} onSave={async (body) => {
+          try { setQlCfg(await setQuickLoginConfig(body)); } catch (e) { alert('Gagal: ' + e.message); }
+        }} />
       )}
 
       {/* Filter org (superadmin) */}
@@ -192,6 +204,13 @@ export default function Users() {
                   Akun aktif
                 </label>
               )}
+              {isSuper && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <input type="checkbox" checked={!!modal.data.quick_login}
+                    onChange={e => setModal({ ...modal, data: { ...modal.data, quick_login: e.target.checked } })} />
+                  <span><Zap size={13} style={{ verticalAlign: '-2px' }} /> Izinkan Quick-Login (tandai sbg akun demo)</span>
+                </label>
+              )}
               <div className="modal-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setModal(null)}>Batal</button>
                 <button type="submit" className="btn btn-primary">Simpan</button>
@@ -200,6 +219,70 @@ export default function Users() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function QuickLoginCard({ cfg, onSave }) {
+  const [enabled, setEnabled] = useState(cfg.enabled);
+  const [showButton, setShowButton] = useState(cfg.show_button_on_login);
+  const [usePass, setUsePass] = useState(cfg.passphrase_enabled);
+  const [passphrase, setPassphrase] = useState('');
+  const [hours, setHours] = useState('');
+  const magic = cfg.magic_url ? window.location.origin + cfg.magic_url : null;
+
+  function save() {
+    const body = { enabled, show_button_on_login: showButton, expires_in_hours: hours ? parseInt(hours) : 0 };
+    if (!usePass) body.passphrase = '';
+    else if (passphrase) body.passphrase = passphrase;
+    onSave(body);
+    setPassphrase('');
+  }
+
+  return (
+    <div className="card mb-6">
+      <div className="card-header">
+        <div className="card-title"><Zap size={18} /> Quick-Login (Demo)</div>
+        <span className="badge" style={{ background: cfg.enabled ? '#d1fae5' : '#f3f4f6', color: cfg.enabled ? '#047857' : '#6b7280' }}>
+          {cfg.enabled ? 'AKTIF' : 'NONAKTIF'}
+        </span>
+      </div>
+      <p className="text-xs text-muted" style={{ marginTop: 0 }}>
+        Login cepat untuk demo/dukungan. Saat nonaktif, semua endpoint quick-login balas 404 (tak terlihat).
+        Hanya akun bertanda <Zap size={11} style={{ verticalAlign: '-1px' }} /> di tabel yang bisa dipakai.
+      </p>
+
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+        <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} /> Aktifkan quick-login
+      </label>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, opacity: enabled ? 1 : 0.5 }}>
+        <input type="checkbox" disabled={!enabled} checked={showButton} onChange={e => setShowButton(e.target.checked)} />
+        Tampilkan tombol di halaman login (matikan utk produksi → hanya via URL rahasia)
+      </label>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, opacity: enabled ? 1 : 0.5 }}>
+        <input type="checkbox" disabled={!enabled} checked={usePass} onChange={e => setUsePass(e.target.checked)} />
+        Wajib passphrase
+      </label>
+      {enabled && usePass && (
+        <input className="form-input" type="text" value={passphrase} onChange={e => setPassphrase(e.target.value)}
+          placeholder={cfg.passphrase_enabled ? 'Isi untuk mengganti passphrase' : 'Passphrase baru'} style={{ marginBottom: 8, maxWidth: 320 }} />
+      )}
+      {enabled && (
+        <div className="form-group" style={{ maxWidth: 320 }}>
+          <label className="form-label">Kedaluwarsa (jam, 0 = tanpa batas)</label>
+          <input className="form-input" type="number" min="0" value={hours} onChange={e => setHours(e.target.value)} placeholder="0" />
+        </div>
+      )}
+
+      {cfg.enabled && magic && (
+        <div className="alert alert-info" style={{ marginBottom: 10, wordBreak: 'break-all', fontSize: 12.5 }}>
+          🔑 URL rahasia: <code>{magic}</code>
+          <button className="btn btn-sm btn-secondary" style={{ marginLeft: 8 }}
+            onClick={() => navigator.clipboard?.writeText(magic)}><Copy size={12} /> Salin</button>
+        </div>
+      )}
+
+      <button className="btn btn-primary btn-sm" onClick={save}>Simpan Pengaturan</button>
     </div>
   );
 }
