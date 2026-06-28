@@ -943,6 +943,11 @@ registerUserHandlers({ app, pool });
 const { registerQuickLoginHandlers } = require('./quick-login');
 registerQuickLoginHandlers({ app, pool });
 
+// Seed DEMO hanya bila diminta (mode `./run.sh demo`). Tak pernah di produksi.
+if (process.env.SEED_DEMO === 'true') {
+  require('./seed-demo').ensureDemoSeed(pool).catch((e) => console.error('⚠ Demo seed error:', e.message));
+}
+
 app.listen(PORT, () => {
   console.log(`🐟 Backend Smart Aquaculture berjalan di port ${PORT}`);
 });

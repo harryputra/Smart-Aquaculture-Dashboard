@@ -245,7 +245,12 @@ summary() {
   fi
   echo -e "    MQTT broker (ESP32 LAN): ${C}<ip-host>:${MQTT_PORT}${N}"
   echo
-  echo -e "  ${BOLD}Data demo${N} sudah di-seed otomatis (database/init.sql). Tanpa login."
+  if [ "$mode" = "demo" ]; then
+    echo -e "  ${BOLD}Login wajib${N} — akun demo ada di bawah. Quick-Login: ${G}AKTIF${N}."
+  else
+    echo -e "  ${BOLD}Login wajib.${N} Admin pertama dari .env: ${C}${ADMIN_EMAIL:-admin@aquaculture.local}${N}"
+    echo -e "  Quick-Login default ${BOLD}nonaktif${N} di produksi. Untuk showcase: ${BOLD}./run.sh demo${N}"
+  fi
   hr
   echo -e "  Stop : ${Y}./run.sh down${N}  | Status : ${Y}./run.sh status${N}  | Log : ${Y}./run.sh logs${N}"
   hr
@@ -280,6 +285,7 @@ do_up() {
 
 do_deploy() {
   need_docker; ensure_env
+  export SEED_DEMO=false   # produksi: TIDAK PERNAH seed data contoh
   hr; echo -e "${BOLD}  Mode PRODUKSI (deploy server)${N}"; hr
   check_secrets
   ensure_mqtt_passwd
@@ -291,6 +297,33 @@ do_deploy() {
   apply_migrations
   summary "produksi"
   cloudflare_hint
+}
+
+# ---------- mode DEMO (showcase: seed data contoh + quick-login ON) ----------
+# Catatan: VM server 4 GB tak cukup utk 2 stack penuh paralel, jadi demo & prod
+# adalah MODE dari satu stack (tidak dijalankan bersamaan). Pemisahan yang penting
+# = SEEDER: data/akun contoh HANYA muncul saat SEED_DEMO=true (mode demo ini).
+do_demo() {
+  need_docker; ensure_env; ensure_mqtt_passwd
+  export SEED_DEMO=true
+  CF=("${CF_DEV[@]}")
+  preflight_ports
+  hr; echo -e "${BOLD}  Mode DEMO (data contoh + Quick-Login aktif)${N}"; hr
+  log "Build & start stack (demo)..."
+  dc up -d --build
+  wait_health
+  apply_migrations
+  log "Seed data contoh dijalankan backend (SEED_DEMO=true) saat boot."
+  summary "demo"
+  demo_accounts
+}
+demo_accounts() {
+  echo -e "  ${BOLD}Akun demo${N} (Quick-Login muncul otomatis di halaman login):"
+  echo -e "    Super Admin : ${C}superdemo@demo.test${N}  / Demo12345"
+  echo -e "    Pemilik     : ${C}andri@demo.test${N}      / Demo12345"
+  echo -e "    Pekerja     : ${C}pekerja@demo.test${N}    / Demo12345"
+  echo -e "    Pengamat    : ${C}pengamat@demo.test${N}   / Demo12345"
+  hr
 }
 
 do_down()    { need_docker; log "Menghentikan semua container..."; dc down; ok "Selesai (data volume tetap aman)."; }
@@ -344,13 +377,20 @@ $(echo -e "${BOLD}${PROJECT} — runner${N}")
     mqtt-test [id]  Kirim status device palsu (uji pipeline tanpa hardware)
     help            Tampilkan bantuan ini
 
+  ${BOLD}Demo / showcase${N}  (seed data + akun contoh + Quick-Login aktif)
+    demo            Start mode demo (SEED_DEMO=true; tombol Quick-Login muncul)
+    demo-down       Stop stack demo (data aman)
+    demo-reset      HAPUS data lalu start demo bersih (re-seed)
+
   ${BOLD}Server / produksi${N}  (HANYA frontend + MQTT yang di-publish ke host)
-    deploy | prod   Start mode produksi (cek secret + petunjuk Cloudflare Tunnel)
+    deploy | prod   Start mode produksi (TANPA data contoh; admin dari .env;
+                    Quick-Login OFF; cek secret + petunjuk Cloudflare Tunnel)
     prod-logs       Alias logs (Ctrl+C keluar log, app tetap jalan)
     prod-down       Stop stack produksi
     prod-restart    Restart stack produksi
 
   Default tanpa argumen = setup + start ${BOLD}dev lokal${N} (bukan untuk server).
+  Catatan: demo & produksi = MODE dari satu stack (VM 4 GB; tak dijalankan bersamaan).
 EOF
 }
 
@@ -359,6 +399,9 @@ cmd="${1:-up}"
 case "$cmd" in
   ""|up|start)        do_up ;;
   deploy|prod)        do_deploy ;;
+  demo)               do_demo ;;
+  demo-down)          do_down ;;
+  demo-reset)         do_reset; do_demo ;;
   down|stop)          do_down ;;
   restart)            do_restart ;;
   status|ps)          do_status ;;

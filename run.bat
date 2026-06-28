@@ -38,6 +38,9 @@ if /i "%CMD%"=="up"           goto :up
 if /i "%CMD%"=="start"        goto :up
 if /i "%CMD%"=="deploy"       goto :deploy
 if /i "%CMD%"=="prod"         goto :deploy
+if /i "%CMD%"=="demo"         goto :demo
+if /i "%CMD%"=="demo-down"    goto :down
+if /i "%CMD%"=="demo-reset"   goto :demoreset
 if /i "%CMD%"=="down"         goto :down
 if /i "%CMD%"=="stop"         goto :down
 if /i "%CMD%"=="prod-down"    goto :down
@@ -110,8 +113,10 @@ goto :end
 
 :deploy
 call :ensure_env
+set "SEED_DEMO=false"
 echo ============================================================
 echo   Mode PRODUKSI (deploy) - hanya frontend + MQTT di-publish
+echo   (TANPA data contoh; admin dari .env; Quick-Login OFF)
 echo ============================================================
 echo [WARN] Pastikan secret di .env sudah DIGANTI dari default!
 echo        (DB_PASSWORD, MQTT_PASSWORD, INFLUX_TOKEN, *_ADMIN_PASSWORD)
@@ -127,6 +132,37 @@ echo   Deploy selesai. Frontend: http://localhost:!WEB_PORT!
 echo   Cloudflare Tunnel: arahkan subdomain -^> http://localhost:!WEB_PORT!
 echo ============================================================
 goto :end
+
+:demo
+call :ensure_env
+call :ensure_passwd
+set "SEED_DEMO=true"
+echo ============================================================
+echo   Mode DEMO (data contoh + Quick-Login aktif)
+echo ============================================================
+%DC% %CFDEV% up -d --build
+if errorlevel 1 goto :end
+call :get_webport
+echo.
+echo ============================================================
+echo   %PROJECT% (mode DEMO) berjalan. Frontend: http://localhost:!WEB_PORT!
+echo   Akun demo (Quick-Login muncul di halaman login):
+echo     Super Admin : superdemo@demo.test  / Demo12345
+echo     Pemilik     : andri@demo.test      / Demo12345
+echo     Pekerja     : pekerja@demo.test    / Demo12345
+echo     Pengamat    : pengamat@demo.test   / Demo12345
+echo ============================================================
+goto :end
+
+:demoreset
+echo [WARN] Ini akan MENGHAPUS semua data lalu re-seed demo!
+set /p ANS=Ketik HAPUS untuk konfirmasi:
+if /i not "!ANS!"=="HAPUS" (
+  echo Dibatalkan.
+  goto :end
+)
+%DC% down -v
+goto :demo
 
 :down
 echo [..] Menghentikan semua container...
@@ -223,7 +259,10 @@ echo   %PROJECT% - runner (Windows)
 echo.
 echo   run.bat [perintah]
 echo     (kosong) ^| up   Setup + start (mode lokal)
-echo     deploy ^| prod   Mode produksi
+echo     demo            Mode demo (data contoh + Quick-Login aktif)
+echo     demo-down       Stop stack demo
+echo     demo-reset      HAPUS data lalu re-seed demo
+echo     deploy ^| prod   Mode produksi (tanpa data contoh; Quick-Login OFF)
 echo     down            Stop semua container
 echo     restart         Restart
 echo     status          Status container

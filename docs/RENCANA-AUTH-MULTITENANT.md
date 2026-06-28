@@ -51,9 +51,14 @@ validasi server, role tak boleh dari client.
 - Config DB singleton, toggle on/off, URL token acak `/q/<token>` (constant-time),
   opsional passphrase/expiry, audit, `showButtonOnLogin`. Demo on, prod off.
 
-**Fase 6 — Mode demo vs deploy**
-- `demo`: seed user contoh tiap peran + quick-login ON. `deploy`: admin dari `.env`,
-  quick-login OFF. Seeder esensial vs demo terpisah (standar global).
+**Fase 6 — Mode demo vs deploy** ✅
+- `./run.sh demo`: `SEED_DEMO=true` → backend seed org/akun contoh tiap peran
+  (quick_login=TRUE) + farm/kolam contoh + quick-login ON. `./run.sh deploy`:
+  `SEED_DEMO=false` → admin dari `.env`, tanpa data contoh, quick-login OFF.
+- Seeder ESENSIAL (auth.js `ensureBootstrap`, selalu) vs DEMO (seed-demo.js, hanya
+  saat `SEED_DEMO=true`) terpisah; produksi tak pernah panggil seed demo.
+- Catatan: demo & prod = MODE dari satu stack (VM 4 GB tak muat 2 stack penuh
+  paralel). Isolasi yang esensial = SEEDER, bukan dua compose project terpisah.
 
 ## Catatan
 - Tambah `AUTH_SECRET` + `ADMIN_EMAIL`/`ADMIN_PASSWORD` ke `.env.example` & compose.
