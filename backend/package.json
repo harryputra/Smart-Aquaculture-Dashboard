@@ -15,7 +15,11 @@
     "@influxdata/influxdb-client": "^1.33.2",
     "dotenv": "^16.3.1",
     "node-cron": "^3.0.3",
-    "body-parser": "^1.20.2"
+    "body-parser": "^1.20.2",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "cookie-parser": "^1.4.6",
+    "express-rate-limit": "^7.1.5"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"

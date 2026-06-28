@@ -191,6 +191,10 @@ services:
       - LELE_MQTT_USER=${LELE_MQTT_USER:-}
       - LELE_MQTT_PASSWORD=${LELE_MQTT_PASSWORD:-}
       - LELE_MQTT_TLS_INSECURE=${LELE_MQTT_TLS_INSECURE:-false}
+      # Auth (Fase 1): rahasia JWT + akun admin pertama (dibuat saat boot).
+      - AUTH_SECRET=${AUTH_SECRET:-dev-secret-ganti-di-produksi}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@aquaculture.local}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:5000/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
       interval: 30s

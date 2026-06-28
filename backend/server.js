@@ -6,6 +6,7 @@
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
+const cookieParser = require('cookie-parser');
 const mqtt = require('mqtt');
 const { Pool } = require('pg');
 const { InfluxDB, Point } = require('@influxdata/influxdb-client');
@@ -17,6 +18,8 @@ const PORT = process.env.PORT || 5000;
 
 app.use(cors());
 app.use(bodyParser.json());
+app.use(cookieParser());
+app.set('trust proxy', 1);   // di belakang nginx/cloudflare → req.ip benar
 
 // ============================
 // PostgreSQL
@@ -904,6 +907,9 @@ registerLeleHandlers({ app, pool, mqttClient: leleMqttClient });
 // Pengelolaan siklus budidaya (tebar→panen) — lihat docs/RENCANA-PENGELOLAAN-KOLAM.md
 const { registerCycleHandlers } = require('./cycle-management');
 registerCycleHandlers({ app, pool });
+
+const { registerAuthHandlers } = require('./auth');
+registerAuthHandlers({ app, pool });
 
 app.listen(PORT, () => {
   console.log(`🐟 Backend Smart Aquaculture berjalan di port ${PORT}`);
