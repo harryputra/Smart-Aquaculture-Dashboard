@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   ArrowLeft, Wifi, WifiOff, Activity, Power, Utensils, Skull,
-  Calendar, FileText, Settings, AlertCircle, Sprout, Scale,
+  Calendar, FileText, Settings, AlertCircle, Sprout, Scale, Wallet,
 } from 'lucide-react';
 import { getPond, getSensorHistory } from '../services/api';
 import MonitorTab from '../components/MonitorTab';
@@ -14,6 +14,7 @@ import LogsTab from '../components/LogsTab';
 import SettingsTab from '../components/SettingsTab';
 import CycleTab from '../components/CycleTab';
 import BiomassTab from '../components/BiomassTab';
+import FinancialTab from '../components/FinancialTab';
 
 export default function PondDetail() {
   const { pondId } = useParams();
@@ -45,6 +46,7 @@ export default function PondDetail() {
       { id: 'cycle', label: 'Siklus', icon: Sprout },
       { id: 'biomass', label: 'Biomassa', icon: Scale },
       { id: 'mortality', label: 'Kematian', icon: Skull },
+      { id: 'financial', label: 'Keuangan', icon: Wallet },
     ] },
     { group: 'Operasional', tabs: [
       { id: 'monitor', label: 'Monitor', icon: Activity },
@@ -105,6 +107,7 @@ export default function PondDetail() {
       <div style={{ marginTop: 12 }}>
         {tab === 'cycle' && <CycleTab pondId={pondId} onChange={loadPond} />}
         {tab === 'biomass' && <BiomassTab pondId={pondId} />}
+        {tab === 'financial' && <FinancialTab pondId={pondId} />}
         {tab === 'monitor' && <MonitorTab pond={pond} history={history} />}
         {tab === 'control' && <ControlTab pond={pond} onChange={loadPond} />}
         {tab === 'feeding' && <FeedingTab pondId={pondId} />}

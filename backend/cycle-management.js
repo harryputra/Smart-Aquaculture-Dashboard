@@ -291,6 +291,99 @@ function registerCycleHandlers({ app, pool }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // ====================================================================
+  // FASE 3 — Pakan & Ekonomi (stok pakan, biaya, proyeksi finansial)
+  // ====================================================================
+  async function ensureFeedStock(pondId) {
+    await pool.query(`INSERT INTO feed_stock (pond_id) VALUES ($1) ON CONFLICT (pond_id) DO NOTHING`, [pondId]);
+  }
+
+  // Stok pakan + harga
+  app.get('/api/ponds/:pondId/feed-stock', async (req, res) => {
+    try {
+      await ensureFeedStock(req.params.pondId);
+      const r = await pool.query(`SELECT * FROM feed_stock WHERE pond_id=$1`, [req.params.pondId]);
+      res.json(r.rows[0]);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Update stok pakan: set stok / tambah stok / threshold / harga
+  app.put('/api/ponds/:pondId/feed-stock', async (req, res) => {
+    const pondId = req.params.pondId;
+    try {
+      await ensureFeedStock(pondId);
+      const cur = (await pool.query(`SELECT * FROM feed_stock WHERE pond_id=$1`, [pondId])).rows[0];
+      const b = req.body || {};
+      let stock = parseFloat(cur.current_stock_kg) || 0;
+      if (b.add_kg != null) stock += parseFloat(b.add_kg) || 0;
+      if (b.current_stock_kg != null) stock = parseFloat(b.current_stock_kg) || 0;
+      if (stock < 0) stock = 0;
+      const low = b.low_threshold_kg != null ? parseFloat(b.low_threshold_kg) : cur.low_threshold_kg;
+      const price = b.price_per_kg != null ? parseFloat(b.price_per_kg) : cur.price_per_kg;
+      const r = await pool.query(
+        `UPDATE feed_stock SET current_stock_kg=$2, low_threshold_kg=$3, price_per_kg=$4, updated_at=NOW()
+         WHERE pond_id=$1 RETURNING *`, [pondId, stock, low, price]);
+      res.json(r.rows[0]);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Biaya operasional siklus aktif
+  app.get('/api/ponds/:pondId/costs', async (req, res) => {
+    try {
+      const cyc = await pool.query(`SELECT cycle_id FROM pond_cycles WHERE pond_id=$1 AND status='active' LIMIT 1`, [req.params.pondId]);
+      if (!cyc.rows.length) return res.json([]);
+      const r = await pool.query(`SELECT * FROM operational_costs WHERE cycle_id=$1 ORDER BY recorded_at DESC`, [cyc.rows[0].cycle_id]);
+      res.json(r.rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/ponds/:pondId/costs', async (req, res) => {
+    try {
+      const cyc = await pool.query(`SELECT cycle_id FROM pond_cycles WHERE pond_id=$1 AND status='active' LIMIT 1`, [req.params.pondId]);
+      if (!cyc.rows.length) return res.status(400).json({ error: 'Tidak ada siklus aktif.' });
+      const { cost_type = 'lain', amount, description = null } = req.body || {};
+      if (amount == null || parseFloat(amount) <= 0) return res.status(400).json({ error: 'amount wajib > 0.' });
+      const r = await pool.query(
+        `INSERT INTO operational_costs (cycle_id, pond_id, cost_type, amount, description)
+         VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+        [cyc.rows[0].cycle_id, req.params.pondId, cost_type, parseFloat(amount), description]);
+      res.json(r.rows[0]);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete('/api/ponds/:pondId/costs/:id', async (req, res) => {
+    try { await pool.query(`DELETE FROM operational_costs WHERE id=$1`, [req.params.id]); res.json({ success: true }); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Proyeksi finansial siklus aktif (biaya berjalan + estimasi panen)
+  app.get('/api/ponds/:pondId/financial', async (req, res) => {
+    const pondId = req.params.pondId;
+    try {
+      const cr = await pool.query(`SELECT * FROM pond_cycles WHERE pond_id=$1 AND status='active' ORDER BY start_date DESC LIMIT 1`, [pondId]);
+      if (!cr.rows.length) return res.json(null);
+      const cycle = cr.rows[0];
+      const m = await cycleMetrics(cycle);
+      await ensureFeedStock(pondId);
+      const fs = (await pool.query(`SELECT * FROM feed_stock WHERE pond_id=$1`, [pondId])).rows[0];
+      const feedPrice = parseFloat(fs.price_per_kg) || 0;
+      const feed_cost = m.total_feed_kg * feedPrice;
+      const op = parseFloat((await pool.query(`SELECT COALESCE(SUM(amount),0) s FROM operational_costs WHERE cycle_id=$1`, [cycle.cycle_id])).rows[0].s) || 0;
+      const fry_cost = parseFloat(cycle.fry_cost_total) || 0;
+      const total_cost = fry_cost + feed_cost + op;
+      const proj_harvest_kg = cycle.target_weight_g ? (m.population * cycle.target_weight_g) / 1000 : null;
+      res.json({
+        cycle_id: cycle.cycle_id, days: m.days, population: m.population,
+        avg_weight_g: m.avg_weight_g, est_biomass_kg: m.est_biomass_kg,
+        total_feed_kg: m.total_feed_kg, feed_price_per_kg: feedPrice,
+        fry_cost: r2(fry_cost), feed_cost: r2(feed_cost), op_cost: r2(op), total_cost: r2(total_cost),
+        target_weight_g: cycle.target_weight_g != null ? parseFloat(cycle.target_weight_g) : null,
+        proj_harvest_kg: r2(proj_harvest_kg),
+        feed_stock: fs,
+      });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   console.log('✓ Cycle/budidaya handlers registered');
 }
 

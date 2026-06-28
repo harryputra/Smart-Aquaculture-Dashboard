@@ -104,3 +104,14 @@ export const deleteBiomassEntry = (pondId, entryId) =>
   req(`/ponds/${pondId}/biomass/entry/${entryId}`, { method: 'DELETE' });
 export const finalizeBiomass = (pondId) =>
   req(`/ponds/${pondId}/biomass/finalize`, { method: 'POST' });
+
+// Keuangan: stok pakan, biaya operasional, proyeksi finansial
+export const getFeedStock = (pondId) => req(`/ponds/${pondId}/feed-stock`);
+export const updateFeedStock = (pondId, data) =>
+  req(`/ponds/${pondId}/feed-stock`, { method: 'PUT', body: data });
+export const getCosts = (pondId) => req(`/ponds/${pondId}/costs`);
+export const addCost = (pondId, data) =>
+  req(`/ponds/${pondId}/costs`, { method: 'POST', body: data });
+export const deleteCost = (pondId, id) =>
+  req(`/ponds/${pondId}/costs/${id}`, { method: 'DELETE' });
+export const getFinancial = (pondId) => req(`/ponds/${pondId}/financial`);
