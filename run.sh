@@ -200,6 +200,7 @@ MIGRATIONS=(
   database/migration-lele-traffic.sql
   database/migration-budidaya.sql
   database/migration-commissioning.sql
+  database/migration-auth.sql
 )
 apply_migrations() {
   load_env
