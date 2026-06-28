@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   ArrowLeft, Wifi, WifiOff, Activity, Power, Utensils, Skull,
-  Calendar, FileText, Settings, AlertCircle,
+  Calendar, FileText, Settings, AlertCircle, Sprout,
 } from 'lucide-react';
 import { getPond, getSensorHistory } from '../services/api';
 import MonitorTab from '../components/MonitorTab';
@@ -12,12 +12,13 @@ import MortalityTab from '../components/MortalityTab';
 import ScheduleTab from '../components/ScheduleTab';
 import LogsTab from '../components/LogsTab';
 import SettingsTab from '../components/SettingsTab';
+import CycleTab from '../components/CycleTab';
 
 export default function PondDetail() {
   const { pondId } = useParams();
   const [pond, setPond] = useState(null);
   const [history, setHistory] = useState([]);
-  const [tab, setTab] = useState('monitor');
+  const [tab, setTab] = useState('cycle');
 
   async function loadPond() {
     try {
@@ -37,14 +38,20 @@ export default function PondDetail() {
 
   const isConnected = pond.is_connected;
 
-  const TABS = [
-    { id: 'monitor', label: 'Monitor', icon: Activity },
-    { id: 'control', label: 'Kontrol', icon: Power },
-    { id: 'feeding', label: 'Pakan', icon: Utensils },
-    { id: 'mortality', label: 'Kematian & Panen', icon: Skull },
-    { id: 'schedule', label: 'Jadwal Kuras', icon: Calendar },
-    { id: 'logs', label: 'Log Aktivitas', icon: FileText },
-    { id: 'settings', label: 'Pengaturan', icon: Settings },
+  // Dikelompokkan: Budidaya (manajemen siklus) vs Operasional (harian/hardware).
+  const GROUPS = [
+    { group: 'Budidaya', tabs: [
+      { id: 'cycle', label: 'Siklus', icon: Sprout },
+      { id: 'mortality', label: 'Kematian', icon: Skull },
+    ] },
+    { group: 'Operasional', tabs: [
+      { id: 'monitor', label: 'Monitor', icon: Activity },
+      { id: 'control', label: 'Kontrol Air', icon: Power },
+      { id: 'feeding', label: 'Pakan', icon: Utensils },
+      { id: 'schedule', label: 'Jadwal Kuras', icon: Calendar },
+      { id: 'logs', label: 'Log Aktivitas', icon: FileText },
+      { id: 'settings', label: 'Pengaturan', icon: Settings },
+    ] },
   ];
 
   return (
@@ -77,24 +84,32 @@ export default function PondDetail() {
         </div>
       )}
 
-      <div className="tabs">
-        {TABS.map(t => {
-          const Icon = t.icon;
-          return (
-            <button key={t.id} className={'tab' + (tab === t.id ? ' active' : '')} onClick={() => setTab(t.id)}>
-              <Icon size={16} /> {t.label}
-            </button>
-          );
-        })}
-      </div>
+      {GROUPS.map(g => (
+        <div key={g.group} style={{ marginBottom: 10 }}>
+          <div className="text-xs text-muted" style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '4px 2px' }}>{g.group}</div>
+          <div className="tabs">
+            {g.tabs.map(t => {
+              const Icon = t.icon;
+              return (
+                <button key={t.id} className={'tab' + (tab === t.id ? ' active' : '')} onClick={() => setTab(t.id)}>
+                  <Icon size={16} /> {t.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
 
-      {tab === 'monitor' && <MonitorTab pond={pond} history={history} />}
-      {tab === 'control' && <ControlTab pond={pond} onChange={loadPond} />}
-      {tab === 'feeding' && <FeedingTab pondId={pondId} />}
-      {tab === 'mortality' && <MortalityTab pondId={pondId} />}
-      {tab === 'schedule' && <ScheduleTab pondId={pondId} />}
-      {tab === 'logs' && <LogsTab pondId={pondId} />}
-      {tab === 'settings' && <SettingsTab pondId={pondId} threshold={pond.threshold} onSaved={loadPond} />}
+      <div style={{ marginTop: 12 }}>
+        {tab === 'cycle' && <CycleTab pondId={pondId} onChange={loadPond} />}
+        {tab === 'monitor' && <MonitorTab pond={pond} history={history} />}
+        {tab === 'control' && <ControlTab pond={pond} onChange={loadPond} />}
+        {tab === 'feeding' && <FeedingTab pondId={pondId} />}
+        {tab === 'mortality' && <MortalityTab pondId={pondId} />}
+        {tab === 'schedule' && <ScheduleTab pondId={pondId} />}
+        {tab === 'logs' && <LogsTab pondId={pondId} />}
+        {tab === 'settings' && <SettingsTab pondId={pondId} threshold={pond.threshold} onSaved={loadPond} />}
+      </div>
     </div>
   );
 }

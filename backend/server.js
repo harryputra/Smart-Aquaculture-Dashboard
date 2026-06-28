@@ -901,6 +901,10 @@ app.get('/api/health', healthHandler);
 const { registerLeleHandlers } = require('./lele-integration');
 registerLeleHandlers({ app, pool, mqttClient: leleMqttClient });
 
+// Pengelolaan siklus budidaya (tebar→panen) — lihat docs/RENCANA-PENGELOLAAN-KOLAM.md
+const { registerCycleHandlers } = require('./cycle-management');
+registerCycleHandlers({ app, pool });
+
 app.listen(PORT, () => {
   console.log(`🐟 Backend Smart Aquaculture berjalan di port ${PORT}`);
 });

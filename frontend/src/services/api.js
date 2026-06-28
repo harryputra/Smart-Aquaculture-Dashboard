@@ -83,3 +83,13 @@ export const getLogs = (pondId) => req(`/logs/${pondId}`);
 
 // Dashboard
 export const getDashboardSummary = () => req('/dashboard/summary');
+
+// Siklus Budidaya (tebar → panen)
+export const getActiveCycle = (pondId) => req(`/ponds/${pondId}/cycle`);
+export const startCycle = (pondId, data) =>
+  req(`/ponds/${pondId}/cycle`, { method: 'POST', body: data });
+export const harvestCycle = (pondId, data) =>
+  req(`/ponds/${pondId}/cycle/harvest`, { method: 'POST', body: data });
+export const getCycles = (pondId) => req(`/ponds/${pondId}/cycles`);
+export const cancelCycle = (pondId, notes) =>
+  req(`/ponds/${pondId}/cycle/cancel`, { method: 'POST', body: { notes } });
