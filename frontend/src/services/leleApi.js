@@ -34,6 +34,8 @@ export const setSpinner = (id, data) =>
   req(`/devices/${id}/control/spinner`, { method: 'POST', body: data });
 export const testSpread = (id, seconds) =>
   req(`/devices/${id}/control/test-spread`, { method: 'POST', body: { seconds } });
+export const setServoOpen = (id, data) =>
+  req(`/devices/${id}/control/servo`, { method: 'POST', body: data });
 export const remoteTare = (id, scale_type) =>
   req(`/devices/${id}/control/tare`, { method: 'POST', body: { scale_type } });
 export const remoteResetSamples = (id) =>

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Hand, CalendarClock, Sparkles, Utensils, Scale, Loader, CheckCircle } from 'lucide-react';
 import {
-  setFeedMode, getFeedProgress, remoteManualFeed, remoteFeedGram, setSpinner, testSpread,
+  setFeedMode, getFeedProgress, remoteManualFeed, remoteFeedGram, setSpinner, testSpread, setServoOpen,
 } from '../../services/leleApi';
 
 const MODES = [
@@ -27,6 +27,9 @@ export default function FeedControlSyncPanel({ device }) {
   const [spnLow, setSpnLow] = useState(live.spinner_pwm_low ?? 175);
   const [spnDir, setSpnDir] = useState(live.spinner_dir_mode ?? 0);
   const [spnSecs, setSpnSecs] = useState(5);
+  // pengaturan buka trapdoor
+  const [svoMode, setSvoMode] = useState(live.servo_open_mode ?? 0);
+  const [svoStall, setSvoStall] = useState(((live.servo_stall_ms ?? 1500) / 1000));
 
   // Poll progress penimbangan saat feeding (cepat) / idle (lambat).
   useEffect(() => {
@@ -67,6 +70,11 @@ export default function FeedControlSyncPanel({ device }) {
     if (!online) { alert('Device offline.'); return; }
     setBusy(true);
     try { await testSpread(deviceId, spnSecs); }
+    catch (e) { alert(e.message); } finally { setTimeout(() => setBusy(false), 600); }
+  }
+  async function saveServo() {
+    setBusy(true);
+    try { await setServoOpen(deviceId, { mode: svoMode, stall_ms: Math.round(svoStall * 1000) }); }
     catch (e) { alert(e.message); } finally { setTimeout(() => setBusy(false), 600); }
   }
 
@@ -170,6 +178,28 @@ export default function FeedControlSyncPanel({ device }) {
               <input className="form-input" type="number" min="1" max="15" value={spnSecs} onChange={e => setSpnSecs(+e.target.value)} style={{ width: 90 }} /></div>
             <button className="btn btn-secondary" disabled={busy || !online || feeding} onClick={doTestSpread}>Test Sebar (tanpa pakan)</button>
           </div>
+        </div>
+      </div>
+
+      {/* BUKA TRAPDOOR (pelepasan pakan) */}
+      <div className="card" style={{ marginTop: 24 }}>
+        <div className="card-header"><div><div className="card-title">Buka Trapdoor (pelepasan pakan)</div>
+          <div className="card-subtitle">Atur cara pakan jatuh ke piringan pemutar</div></div></div>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div className="form-group" style={{ margin: 0 }}><label className="form-label">Mode buka</label>
+            <select className="form-select" value={svoMode} onChange={e => setSvoMode(+e.target.value)}>
+              <option value={0}>Instan (langsung penuh)</option>
+              <option value={1}>Bertahap (metered, sedikit demi sedikit)</option>
+            </select></div>
+          {svoMode === 1 && (
+            <div className="form-group" style={{ margin: 0 }}><label className="form-label">Ambang anti-macet (detik)</label>
+              <input className="form-input" type="number" min="0.3" max="8" step="0.1" value={svoStall} onChange={e => setSvoStall(+e.target.value)} style={{ width: 150 }} /></div>
+          )}
+          <button className="btn btn-primary" disabled={busy || !online} onClick={saveServo}>Simpan</button>
+        </div>
+        <div className="text-xs text-muted" style={{ marginTop: 8 }}>
+          <strong>Bertahap</strong>: trapdoor buka celah kecil dulu → pakan menetes ke piringan; celah otomatis melebar bila aliran berhenti (anti-macet). Cocok untuk sebaran lebih rata.
+          {live.servo_open_mode != null && <> · Aktif di device: {live.servo_open_mode === 1 ? `bertahap (anti-macet ${(live.servo_stall_ms / 1000).toFixed(1)}s)` : 'instan'}.</>}
         </div>
       </div>
 

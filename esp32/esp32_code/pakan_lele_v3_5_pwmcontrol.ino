@@ -206,6 +206,9 @@ int     spinnerCurrentPWM = 0;   // duty cycle aktif (0-255), untuk MQTT status
 uint8_t spinnerPwmHigh = SPINNER_PWM_MAX;  // kecepatan "tinggi" (lempar jauh)
 uint8_t spinnerPwmLow  = SPINNER_PWM_MIN;  // kecepatan "rendah" (lempar dekat)
 int     spinnerDirMode = 0;                // 0=bolak-balik, 1=kanan(CW), 2=kiri(CCW)
+// Pembukaan trapdoor: 0=instan (langsung penuh), 1=bertahap mengikuti berat (metered).
+int     servoOpenMode = 0;
+int     servoStallMs  = 1500;              // ms tanpa penurunan berat → nudge buka lebih lebar (anti-macet)
 
 // =====================================================
 // CALIBRATION FACTOR
@@ -626,6 +629,8 @@ void loadSettings() {
   spinnerPwmHigh = prefs.getInt("spnHigh", SPINNER_PWM_MAX);
   spinnerPwmLow  = prefs.getInt("spnLow",  SPINNER_PWM_MIN);
   spinnerDirMode = prefs.getInt("spnDir",  0);
+  servoOpenMode  = prefs.getInt("svoMode", 0);
+  servoStallMs   = prefs.getInt("svoStall", 1500);
 
   for (int i = 0; i < SCHEDULE_COUNT; i++) {
     char keyH[8], keyM[8], keyE[8];
@@ -662,6 +667,8 @@ void saveSettings() {
   prefs.putInt ("spnHigh",      spinnerPwmHigh);
   prefs.putInt ("spnLow",       spinnerPwmLow);
   prefs.putInt ("spnDir",       spinnerDirMode);
+  prefs.putInt ("svoMode",      servoOpenMode);
+  prefs.putInt ("svoStall",     servoStallMs);
 
   for (int i = 0; i < SCHEDULE_COUNT; i++) {
     char keyH[8], keyM[8], keyE[8];
@@ -993,6 +1000,8 @@ void onMqttMessage(const String& topic, const String& payload, const size_t size
     if (doc.containsKey("spinner_pwm_high")) { int v = doc["spinner_pwm_high"]; spinnerPwmHigh = constrain(v, 120, 255); changed = true; }
     if (doc.containsKey("spinner_pwm_low"))  { int v = doc["spinner_pwm_low"];  spinnerPwmLow  = constrain(v, 120, 255); changed = true; }
     if (doc.containsKey("spinner_dir"))      { int v = doc["spinner_dir"];      if (v >= 0 && v <= 2) { spinnerDirMode = v; changed = true; } }
+    if (doc.containsKey("servo_open_mode"))  { int v = doc["servo_open_mode"];   if (v == 0 || v == 1) { servoOpenMode = v; changed = true; } }
+    if (doc.containsKey("servo_stall_ms"))   { int v = doc["servo_stall_ms"];    servoStallMs = constrain(v, 300, 8000); changed = true; }
     if (changed) {
       saveSettings();
       publishDeviceStatus(true);
@@ -1117,6 +1126,8 @@ void publishDeviceStatus(bool forcePublish) {
   payload += "\"spinner_pwm_high\":"     + String(spinnerPwmHigh)                         + ",";
   payload += "\"spinner_pwm_low\":"      + String(spinnerPwmLow)                          + ",";
   payload += "\"spinner_dir_mode\":"     + String(spinnerDirMode)                         + ",";
+  payload += "\"servo_open_mode\":"      + String(servoOpenMode)                          + ",";
+  payload += "\"servo_stall_ms\":"       + String(servoStallMs)                           + ",";
   payload += "\"next_schedule_hhmm\":\"" + nextScheduleHHMM()                             + "\",";
   payload += "\"seconds_to_next_feed\":" + String(secLeft)                                + ",";
   payload += "\"last_feed_success\":"    + String(lastFeedSuccess ? "true" : "false")     + ",";
@@ -1574,6 +1585,12 @@ void servoInitClose() {
 }
 void servoOpen()  { doorServo.write(SERVO_OPEN_ANGLE);  servoCommandAngle = SERVO_OPEN_ANGLE;  }
 void servoClose() { doorServo.write(SERVO_CLOSE_ANGLE); servoCommandAngle = SERVO_CLOSE_ANGLE; }
+// Tulis sudut servo dgn batas aman (untuk buka bertahap/metered).
+void servoWrite(int a) {
+  if (a < SERVO_CLOSE_ANGLE) a = SERVO_CLOSE_ANGLE;
+  if (a > SERVO_OPEN_ANGLE)  a = SERVO_OPEN_ANGLE;
+  doorServo.write(a); servoCommandAngle = a;
+}
 
 void stepperEnable()  { digitalWrite(STEPPER_ENA_PIN, STEPPER_ENABLE_LEVEL);  stepperEnabledState = true;  delay(300); }
 void stepperDisable() {
@@ -1896,16 +1913,22 @@ bool runSingleBatch(float targetGram, int batchIndex, int batchNo, int totalBatc
   spinnerUpdatePWM(batchIndex, batchPWM);
   delay(SPINNER_PRESTART_MS);
 
-  // ---- BUKA TRAPDOOR ----
-  lcd.clear(); lcdLine(0,"SERVO OPEN"); lcdLine(1,"Dispensing...");
-  servoOpen();
-
+  // ---- BUKA TRAPDOOR (instan / bertahap-metered) ----
   unsigned long dispenseStart = millis();
   lastLCD = 0;
+  if (servoOpenMode == 1) {
+    // Metered: buka celah kecil dulu → pakan menetes ke piringan yang sudah berputar.
+    lcd.clear(); lcdLine(0,"BUKA BERTAHAP"); lcdLine(1,"Metered...");
+    servoWrite(SERVO_CLOSE_ANGLE + 3);
+  } else {
+    lcd.clear(); lcdLine(0,"SERVO OPEN"); lcdLine(1,"Dispensing...");
+    servoOpen();
+  }
 
-  // ---- DISPENSE LOOP: PWM TETAP (ganjil=255, genap=175) ----
-  // Kecepatan spinner tidak berubah selama dispensing.
-  // Batch ganjil melempar jauh ke tepian; batch genap ke tengah kolam.
+  float lastGram = readChamberInstantGram();
+  unsigned long lastDrop = millis();
+
+  // ---- DISPENSE LOOP ----
   while (true) {
     maintainNetwork();
     if (backPressed()) {
@@ -1926,11 +1949,19 @@ bool runSingleBatch(float targetGram, int batchIndex, int batchNo, int totalBatc
       return false;
     }
 
+    // METERED + ANTI-MACET: lebarkan celah HANYA bila aliran pakan berhenti.
+    if (servoOpenMode == 1) {
+      if (lastGram - gram > 0.5f) { lastGram = gram; lastDrop = millis(); }   // pakan masih mengalir
+      else if (millis() - lastDrop > (unsigned long)servoStallMs && servoCommandAngle < SERVO_OPEN_ANGLE) {
+        servoWrite(servoCommandAngle + 3);   // nudge: buka lebih lebar untuk lepas pelet nyangkut
+        lastDrop = millis();
+      }
+    }
+
     if (millis() - lastLCD >= 300) {
       lastLCD = millis();
-      // LCD: tampilkan sisa berat chamber dan duty cycle spinner (tetap)
       lcdLine(0, "DISP B:" + String(batchNo) + "/" + String(totalBatches));
-      lcdLine(1, "CH:" + formatGram(gram) + "g P:" + String(batchPWM));
+      lcdLine(1, "CH:" + formatGram(gram) + "g A:" + String(servoCommandAngle));
     }
   }
 

@@ -428,6 +428,17 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
     res.json({ success: true, ...cfg });
   });
 
+  // Mode buka trapdoor: instan vs bertahap (metered) + ambang anti-macet (ms).
+  app.post('/api/lele/devices/:deviceId/control/servo', (req, res) => {
+    const cfg = {};
+    const b = req.body || {};
+    if (b.mode != null) { const m = parseInt(b.mode); if (m === 0 || m === 1) cfg.servo_open_mode = m; }
+    if (b.stall_ms != null) cfg.servo_stall_ms = Math.max(300, Math.min(8000, parseInt(b.stall_ms)));
+    if (!Object.keys(cfg).length) return res.status(400).json({ error: 'Tidak ada parameter servo.' });
+    sendConfig(req.params.deviceId, cfg);
+    res.json({ success: true, ...cfg });
+  });
+
   // Test sebar: putar spinner X detik tanpa pakan (kalibrasi).
   app.post('/api/lele/devices/:deviceId/control/test-spread', (req, res) => {
     const seconds = Math.max(1, Math.min(15, parseInt(req.body?.seconds) || 5));
