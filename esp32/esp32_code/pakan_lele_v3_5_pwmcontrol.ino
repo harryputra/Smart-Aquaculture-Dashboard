@@ -897,6 +897,7 @@ void onMqttMessage(const String& topic, const String& payload, const size_t size
       else { publishAck(command, false, "Unknown button"); return; }
       publishAck(command, true, String("Button ") + btn);
     }
+    else if (strcmp(command, "ping") == 0) { publishAck(command, true, "pong"); }
     else { publishAck(command, false, "Unknown command"); }
   }
   else if (topicStr == topicConfig) {

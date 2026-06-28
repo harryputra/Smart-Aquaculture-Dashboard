@@ -18,10 +18,31 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
   const ackCache = {};
   const liveDataCache = {};
 
+  // Rekam lalu lintas MQTT (untuk monitor/diagnostik). Fire-and-forget.
+  function recordTraffic(direction, topic, payloadStr, deviceId) {
+    let isError = false;
+    if (direction === 'in') {
+      if (topic.endsWith('/error')) isError = true;
+      else if (topic.endsWith('/ack')) {
+        try { const p = JSON.parse(payloadStr); if (p && p.success === false) isError = true; } catch (_) {}
+      }
+    }
+    pool.query(
+      `INSERT INTO lele_mqtt_traffic (device_id, direction, topic, payload, is_error)
+       VALUES ($1,$2,$3,$4,$5)`,
+      [deviceId || null, direction, topic, payloadStr, isError]
+    ).catch(() => {});
+  }
+
   mqttClient.on('message', async (topic, message) => {
     if (!topic.startsWith('lele/')) return;
+    const _raw = message.toString();
+    // Rekam inbound lebih dulu (termasuk bila payload bukan JSON valid).
+    let _did = null;
+    try { _did = JSON.parse(_raw).device_id || null; } catch (_) {}
+    recordTraffic('in', topic, _raw, _did);
     try {
-      const payload = JSON.parse(message.toString());
+      const payload = JSON.parse(_raw);
       const deviceId = payload.device_id || 'unknown';
       const pondR = await pool.query(`SELECT pond_id FROM lele_devices WHERE device_id = $1`, [deviceId]);
       const pondId = pondR.rows[0]?.pond_id || null;
@@ -254,19 +275,25 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
         `UPDATE lele_devices SET is_online = FALSE
          WHERE is_online = TRUE AND last_seen < NOW() - INTERVAL '30 seconds'`
       );
+      // Bersihkan log traffic lama (retensi 2 hari) agar DB tidak membengkak.
+      await pool.query(`DELETE FROM lele_mqtt_traffic WHERE created_at < NOW() - INTERVAL '2 days'`);
     } catch (e) { /* */ }
   }, 15000);
 
   function sendCommand(deviceId, command, extra = {}) {
     const topic = `lele/device/${deviceId}/command`;
     const payload = { command, source: 'dashboard', timestamp: Date.now(), ...extra };
-    mqttClient.publish(topic, JSON.stringify(payload));
+    const json = JSON.stringify(payload);
+    mqttClient.publish(topic, json);
+    recordTraffic('out', topic, json, deviceId);
     console.log(`📤 CMD → ${topic}: ${command}`);
   }
 
   function sendConfig(deviceId, config) {
     const topic = `lele/device/${deviceId}/config`;
-    mqttClient.publish(topic, JSON.stringify(config));
+    const json = JSON.stringify(config);
+    mqttClient.publish(topic, json);
+    recordTraffic('out', topic, json, deviceId);
     console.log(`📤 CONFIG → ${topic}`);
   }
 
@@ -308,6 +335,59 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
         [pond_id, name, req.params.deviceId]
       );
       res.json(r.rows[0]);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ============================
+  // MONITOR / DIAGNOSTIK — lalu lintas MQTT 2 arah
+  // ============================
+  // Traffic per device. afterId>0 = incremental (live); afterId=0 = N terakhir.
+  app.get('/api/lele/devices/:deviceId/traffic', async (req, res) => {
+    try {
+      const afterId = parseInt(req.query.afterId) || 0;
+      const limit = Math.min(parseInt(req.query.limit) || 120, 500);
+      let r;
+      if (afterId > 0) {
+        r = await pool.query(
+          `SELECT id, device_id, direction, topic, payload, is_error, created_at
+           FROM lele_mqtt_traffic WHERE device_id = $1 AND id > $2
+           ORDER BY id ASC LIMIT $3`, [req.params.deviceId, afterId, limit]);
+        res.json(r.rows);
+      } else {
+        r = await pool.query(
+          `SELECT id, device_id, direction, topic, payload, is_error, created_at
+           FROM lele_mqtt_traffic WHERE device_id = $1
+           ORDER BY id DESC LIMIT $2`, [req.params.deviceId, limit]);
+        res.json(r.rows.reverse());
+      }
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Traffic global (semua device sekaligus).
+  app.get('/api/lele/traffic', async (req, res) => {
+    try {
+      const afterId = parseInt(req.query.afterId) || 0;
+      const limit = Math.min(parseInt(req.query.limit) || 150, 500);
+      let r;
+      if (afterId > 0) {
+        r = await pool.query(
+          `SELECT id, device_id, direction, topic, payload, is_error, created_at
+           FROM lele_mqtt_traffic WHERE id > $1 ORDER BY id ASC LIMIT $2`, [afterId, limit]);
+        res.json(r.rows);
+      } else {
+        r = await pool.query(
+          `SELECT id, device_id, direction, topic, payload, is_error, created_at
+           FROM lele_mqtt_traffic ORDER BY id DESC LIMIT $1`, [limit]);
+        res.json(r.rows.reverse());
+      }
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Test koneksi end-to-end: kirim ping → device balas ACK (firmware: "pong").
+  app.post('/api/lele/devices/:deviceId/ping', async (req, res) => {
+    try {
+      sendCommand(req.params.deviceId, 'ping');
+      res.json({ success: true, sentAt: Date.now() });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 

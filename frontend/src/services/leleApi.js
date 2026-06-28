@@ -42,6 +42,14 @@ export const remoteConfig = (id, config) =>
 export const remoteUpdateSchedule = (id, idx, data) =>
   req(`/devices/${id}/schedule/${idx}`, { method: 'PUT', body: data });
 
+// MONITOR / DIAGNOSTIK (lalu lintas MQTT 2 arah)
+export const getDeviceTraffic = (id, afterId = 0, limit = 120) =>
+  req(`/devices/${id}/traffic?afterId=${afterId}&limit=${limit}`);
+export const getGlobalTraffic = (afterId = 0, limit = 150) =>
+  req(`/traffic?afterId=${afterId}&limit=${limit}`);
+export const pingDevice = (id) =>
+  req(`/devices/${id}/ping`, { method: 'POST' });
+
 // DATA QUERIES
 export const getLeleBiomassSamples = (id) => req(`/devices/${id}/biomass-samples`);
 export const getLeleBiomassSummary = (id) => req(`/devices/${id}/biomass-summary`);

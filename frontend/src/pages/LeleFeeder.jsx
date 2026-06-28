@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   Cpu, Activity, Utensils, Scale, Database, Clock,
   Settings as SettingsIcon, History, Sliders, X,
-  Wifi, WifiOff, FlaskConical, Radio,
+  Wifi, WifiOff, FlaskConical, Radio, Terminal,
 } from 'lucide-react';
 import { getLeleDevices, assignLeleDevice } from '../services/leleApi';
 import { getPonds } from '../services/api';
@@ -16,6 +16,7 @@ import KalibrasiTarePanel   from '../components/lele/KalibrasiTarePanel';
 import RiwayatAkhirPanel    from '../components/lele/RiwayatAkhirPanel';
 import PengaturanPanel      from '../components/lele/PengaturanPanel';
 import ManualModePanel      from '../components/lele/ManualModePanel';
+import MqttMonitorPanel     from '../components/lele/MqttMonitorPanel';
 
 const PANELS = [
   { id: 'status',    label: 'Status Sistem',    icon: Activity },
@@ -25,6 +26,7 @@ const PANELS = [
   { id: 'schedule',  label: 'Jadwal Pakan',     icon: Clock },
   { id: 'tare',      label: 'Kalibrasi/Tare',   icon: Sliders },
   { id: 'history',   label: 'Riwayat Akhir',    icon: History },
+  { id: 'monitor',   label: 'Diagnostik',       icon: Terminal },
   { id: 'settings',  label: 'Pengaturan',       icon: SettingsIcon },
 ];
 
@@ -204,6 +206,7 @@ export default function LeleFeeder() {
                   {tab === 'schedule'  && <JadwalPakanPanel device={device} />}
                   {tab === 'tare'      && <KalibrasiTarePanel device={device} />}
                   {tab === 'history'   && <RiwayatAkhirPanel device={device} />}
+                  {tab === 'monitor'   && <MqttMonitorPanel deviceId={device.device_id} device={device} />}
                   {tab === 'settings'  && <PengaturanPanel device={device} onAssign={() => setShowAssign(true)} />}
                 </>
               )}
