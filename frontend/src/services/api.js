@@ -115,3 +115,15 @@ export const addCost = (pondId, data) =>
 export const deleteCost = (pondId, id) =>
   req(`/ponds/${pondId}/costs/${id}`, { method: 'DELETE' });
 export const getFinancial = (pondId) => req(`/ponds/${pondId}/financial`);
+
+// Logbook, audit air, ekspor, arsip (Fase 4)
+export const getLogbook = (pondId) => req(`/ponds/${pondId}/logbook`);
+export const addLogbook = (pondId, data) =>
+  req(`/ponds/${pondId}/logbook`, { method: 'POST', body: data });
+export const deleteLogbook = (pondId, id) =>
+  req(`/ponds/${pondId}/logbook/${id}`, { method: 'DELETE' });
+export const getWaterAudit = (pondId, days = 7) =>
+  req(`/ponds/${pondId}/water-audit?days=${days}`);
+export const archivePond = (pondId, is_active) =>
+  req(`/ponds/${pondId}/archive`, { method: 'PUT', body: { is_active } });
+export const exportUrl = (pondId, type) => `${API}/ponds/${pondId}/export?type=${type}`;

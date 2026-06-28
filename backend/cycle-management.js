@@ -384,6 +384,105 @@ function registerCycleHandlers({ app, pool }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // ====================================================================
+  // FASE 4 — Logbook, Audit Air, Ekspor CSV, Arsip
+  // ====================================================================
+
+  // ---- Logbook / catatan ----
+  app.get('/api/ponds/:pondId/logbook', async (req, res) => {
+    try {
+      const r = await pool.query(
+        `SELECT * FROM pond_logbook WHERE pond_id=$1 ORDER BY recorded_at DESC LIMIT 200`, [req.params.pondId]);
+      res.json(r.rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+  app.post('/api/ponds/:pondId/logbook', async (req, res) => {
+    try {
+      const { entry_type = 'observasi', content } = req.body || {};
+      if (!content || !content.trim()) return res.status(400).json({ error: 'Isi catatan kosong.' });
+      const cyc = await pool.query(`SELECT cycle_id FROM pond_cycles WHERE pond_id=$1 AND status='active' LIMIT 1`, [req.params.pondId]);
+      const r = await pool.query(
+        `INSERT INTO pond_logbook (pond_id, cycle_id, entry_type, content) VALUES ($1,$2,$3,$4) RETURNING *`,
+        [req.params.pondId, cyc.rows[0]?.cycle_id || null, entry_type, content.trim()]);
+      res.json(r.rows[0]);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+  app.delete('/api/ponds/:pondId/logbook/:id', async (req, res) => {
+    try { await pool.query(`DELETE FROM pond_logbook WHERE id=$1`, [req.params.id]); res.json({ success: true }); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ---- Audit kualitas air N hari (forensik kematian) ----
+  app.get('/api/ponds/:pondId/water-audit', async (req, res) => {
+    try {
+      const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 30);
+      const end = req.query.date ? new Date(req.query.date) : new Date();
+      const start = new Date(end.getTime() - days * 86400000);
+      const s = await pool.query(
+        `SELECT COUNT(*) AS n,
+           AVG(temperature) t_avg, MIN(temperature) t_min, MAX(temperature) t_max,
+           AVG(ph) ph_avg, MIN(ph) ph_min, MAX(ph) ph_max,
+           AVG(dissolved_oxygen) do_avg, MIN(dissolved_oxygen) do_min, MAX(dissolved_oxygen) do_max,
+           AVG(turbidity) tu_avg, MIN(turbidity) tu_min, MAX(turbidity) tu_max,
+           AVG(depth) d_avg, MIN(depth) d_min, MAX(depth) d_max
+         FROM sensor_data WHERE pond_id=$1 AND timestamp >= $2 AND timestamp <= $3`,
+        [req.params.pondId, start, end]);
+      const th = (await pool.query(`SELECT * FROM sensor_thresholds WHERE pond_id=$1`, [req.params.pondId])).rows[0] || {};
+      const row = s.rows[0];
+      const num = (v) => (v == null ? null : Math.round(parseFloat(v) * 100) / 100);
+      const fields = {
+        temperature: { avg: num(row.t_avg), min: num(row.t_min), max: num(row.t_max), lo: th.temp_min, hi: th.temp_max },
+        ph:          { avg: num(row.ph_avg), min: num(row.ph_min), max: num(row.ph_max), lo: th.ph_min, hi: th.ph_max },
+        dissolved_oxygen: { avg: num(row.do_avg), min: num(row.do_min), max: num(row.do_max), lo: th.do_min, hi: th.do_max },
+        turbidity:   { avg: num(row.tu_avg), min: num(row.tu_min), max: num(row.tu_max), lo: null, hi: th.turbidity_max },
+        depth:       { avg: num(row.d_avg), min: num(row.d_min), max: num(row.d_max), lo: th.depth_min, hi: th.depth_max },
+      };
+      for (const k in fields) {
+        const f = fields[k];
+        f.breach = (f.lo != null && f.min != null && f.min < f.lo) || (f.hi != null && f.max != null && f.max > f.hi);
+      }
+      res.json({ days, from: start, to: end, samples: parseInt(row.n) || 0, fields });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ---- Ekspor CSV (sensors | feeding | mortality | cycles) ----
+  function toCSV(rows) {
+    if (!rows.length) return '';
+    const cols = Object.keys(rows[0]);
+    const esc = (v) => {
+      if (v == null) return '';
+      const s = (v instanceof Date) ? v.toISOString() : String(v);
+      return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    return cols.join(',') + '\n' + rows.map(r => cols.map(c => esc(r[c])).join(',')).join('\n');
+  }
+  app.get('/api/ponds/:pondId/export', async (req, res) => {
+    const pondId = req.params.pondId;
+    const type = String(req.query.type || 'sensors');
+    try {
+      let rows = [];
+      if (type === 'sensors') rows = (await pool.query(`SELECT timestamp, temperature, ph, dissolved_oxygen, turbidity, depth, source FROM sensor_data WHERE pond_id=$1 ORDER BY timestamp DESC LIMIT 10000`, [pondId])).rows;
+      else if (type === 'feeding') rows = (await pool.query(`SELECT timestamp, feed_amount_kg, feed_type, triggered_by, cycle_id, note FROM feeding_logs WHERE pond_id=$1 ORDER BY timestamp DESC LIMIT 10000`, [pondId])).rows;
+      else if (type === 'mortality') rows = (await pool.query(`SELECT recorded_at, death_count, cause, cycle_id, note FROM mortality_records WHERE pond_id=$1 ORDER BY recorded_at DESC LIMIT 10000`, [pondId])).rows;
+      else if (type === 'cycles') rows = (await pool.query(`SELECT cycle_id, start_date, harvest_date, status, initial_stock, harvest_total_kg, survival_rate, fcr, harvest_revenue, total_cost, profit, roi FROM pond_cycles WHERE pond_id=$1 ORDER BY created_at DESC`, [pondId])).rows;
+      else return res.status(400).json({ error: 'type: sensors|feeding|mortality|cycles' });
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${pondId}-${type}.csv"`);
+      res.send(toCSV(rows));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ---- Arsip kolam ----
+  app.put('/api/ponds/:pondId/archive', async (req, res) => {
+    try {
+      const isActive = req.body?.is_active === true;   // is_active=true → aktifkan, false → arsipkan
+      const r = await pool.query(`UPDATE ponds SET is_active=$2 WHERE pond_id=$1 RETURNING pond_id, is_active`,
+        [req.params.pondId, isActive]);
+      if (!r.rows.length) return res.status(404).json({ error: 'Kolam tak ada.' });
+      res.json(r.rows[0]);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   console.log('✓ Cycle/budidaya handlers registered');
 }
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Plus, Skull, Trash2, X } from 'lucide-react';
+import { Plus, Skull, Trash2, X, Droplets, AlertTriangle } from 'lucide-react';
 import {
-  getMortalityRecords, getMortalitySummary, recordMortality, deleteMortality,
+  getMortalityRecords, getMortalitySummary, recordMortality, deleteMortality, getWaterAudit,
 } from '../services/api';
 
 export default function MortalityTab({ pondId }) {
@@ -43,6 +43,14 @@ export default function MortalityTab({ pondId }) {
   const mortalityRate = summary?.initial_fish_count
     ? ((summary.total_deaths / summary.initial_fish_count) * 100).toFixed(2)
     : 0;
+
+  const [audit, setAudit] = useState(null);
+  const [auditBusy, setAuditBusy] = useState(false);
+  async function runAudit() {
+    setAuditBusy(true);
+    try { setAudit(await getWaterAudit(pondId, 7)); } catch (e) { alert(e.message); } finally { setAuditBusy(false); }
+  }
+  const FIELD_LABEL = { temperature: 'Suhu (°C)', ph: 'pH', dissolved_oxygen: 'DO (mg/L)', turbidity: 'Kekeruhan (NTU)', depth: 'Kedalaman (cm)' };
 
   return (
     <>
@@ -119,6 +127,45 @@ export default function MortalityTab({ pondId }) {
               </tbody>
             </table>
           </div>
+        )}
+      </div>
+
+      {/* Audit kualitas air 7 hari (forensik kematian) */}
+      <div className="card" style={{ marginTop: 24 }}>
+        <div className="card-header">
+          <div>
+            <div className="card-title"><Droplets size={18} style={{ verticalAlign: -3 }} /> Audit Kualitas Air (7 hari)</div>
+            <div className="card-subtitle">Cek anomali sensor menjelang kematian — bandingkan vs ambang batas</div>
+          </div>
+          <button className="btn btn-secondary" onClick={runAudit} disabled={auditBusy}>
+            {auditBusy ? 'Memuat...' : 'Jalankan Audit'}
+          </button>
+        </div>
+        {audit && (
+          audit.samples === 0 ? (
+            <div className="text-muted" style={{ padding: 12 }}>Tidak ada data sensor pada 7 hari terakhir.</div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <div className="text-xs text-muted" style={{ marginBottom: 8 }}>{audit.samples} pembacaan · {new Date(audit.from).toLocaleDateString('id-ID')} – {new Date(audit.to).toLocaleDateString('id-ID')}</div>
+              <table className="table">
+                <thead><tr><th>Parameter</th><th>Rata2</th><th>Min</th><th>Maks</th><th>Ambang</th><th>Status</th></tr></thead>
+                <tbody>
+                  {Object.entries(audit.fields).map(([k, f]) => (
+                    <tr key={k} style={f.breach ? { background: 'rgba(239,68,68,0.08)' } : {}}>
+                      <td style={{ fontWeight: 600 }}>{FIELD_LABEL[k] || k}</td>
+                      <td>{f.avg ?? '-'}</td>
+                      <td>{f.min ?? '-'}</td>
+                      <td>{f.max ?? '-'}</td>
+                      <td className="text-xs text-muted">{f.lo ?? '–'} … {f.hi ?? '–'}</td>
+                      <td>{f.breach
+                        ? <span className="badge badge-warning"><AlertTriangle size={12} /> Anomali</span>
+                        : <span className="badge badge-success">Normal</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
         )}
       </div>
 

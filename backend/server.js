@@ -494,15 +494,15 @@ app.delete('/api/farms/:id', async (req, res) => {
 // ----- Ponds -----
 app.get('/api/ponds', async (req, res) => {
   try {
-    const { farm_id } = req.query;
-    let q = `SELECT p.*, ds.is_connected, ds.last_seen 
-             FROM ponds p 
+    const { farm_id, include_archived } = req.query;
+    let q = `SELECT p.*, ds.is_connected, ds.last_seen
+             FROM ponds p
              LEFT JOIN device_status ds ON p.pond_id = ds.pond_id`;
     const params = [];
-    if (farm_id) {
-      q += ` WHERE p.farm_id = $1`;
-      params.push(farm_id);
-    }
+    const where = [];
+    if (farm_id) { params.push(farm_id); where.push(`p.farm_id = $${params.length}`); }
+    if (include_archived !== '1') where.push(`(p.is_active IS DISTINCT FROM FALSE)`);  // sembunyikan arsip
+    if (where.length) q += ` WHERE ` + where.join(' AND ');
     q += ` ORDER BY p.created_at DESC`;
     const r = await pool.query(q, params);
     res.json(r.rows);
