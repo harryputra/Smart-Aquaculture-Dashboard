@@ -41,13 +41,20 @@ pool.on('error', (err) => console.error('✗ PostgreSQL error:', err));
 // sekarang lewat WSS ke domain kampus supaya satu jalur dengan ESP32
 // dan tidak terganggu masalah IP lokal yang berubah-ubah.
 // ============================
-const MQTT_PROTOCOL = process.env.MQTT_PROTOCOL || 'wss';
-const MQTT_HOST = process.env.MQTT_HOST || 'mqtt.trin-polman.id';
-const MQTT_PORT = process.env.MQTT_PORT || 443;
+// Default: konek ke mosquitto LOKAL (satu jaringan docker, stabil). ESP32 remote
+// konek ke broker yang SAMA via WSS/Cloudflare → keduanya bertemu di mosquitto.
+// (Bisa dipaksa WSS dgn set MQTT_PROTOCOL=wss + MQTT_HOST domain + MQTT_PORT 443.)
+const MQTT_PROTOCOL = process.env.MQTT_PROTOCOL || 'mqtt';
+const MQTT_HOST = process.env.MQTT_HOST || 'mosquitto';
+const MQTT_PORT = process.env.MQTT_PORT || 1883;
 const MQTT_PATH = process.env.MQTT_PATH || '/';
+const _isWs = MQTT_PROTOCOL === 'ws' || MQTT_PROTOCOL === 'wss';
+const MQTT_URL = _isWs
+  ? `${MQTT_PROTOCOL}://${MQTT_HOST}:${MQTT_PORT}${MQTT_PATH}`
+  : `${MQTT_PROTOCOL}://${MQTT_HOST}:${MQTT_PORT}`;
 
 const mqttClient = mqtt.connect(
-  `${MQTT_PROTOCOL}://${MQTT_HOST}:${MQTT_PORT}${MQTT_PATH}`,
+  MQTT_URL,
   {
     username: process.env.MQTT_USER || 'aquaculture',
     password: process.env.MQTT_PASSWORD || 'aquaculture123', // password yang sudah dipakai di sistem kita
@@ -58,7 +65,7 @@ const mqttClient = mqtt.connect(
 );
 
 mqttClient.on('connect', () => {
-  console.log(`✓ MQTT terhubung (WSS ke ${MQTT_HOST}:${MQTT_PORT})`);
+  console.log(`✓ MQTT terhubung (${MQTT_URL})`);
   mqttClient.subscribe('aquaculture/+/+/sensors');
   mqttClient.subscribe('aquaculture/+/+/status');
 });

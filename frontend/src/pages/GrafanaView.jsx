@@ -5,7 +5,6 @@ export default function GrafanaView() {
   const [refreshKey, setRefreshKey] = useState(0);
 
   const grafanaUrl = '/grafana/d/aquaculture/smart-aquaculture-dashboard?orgId=1&refresh=5s&kiosk=tv';
->>>>>>> upstream/main
 
   const handleFullscreen = () => {
     const iframe = document.getElementById('grafana-iframe');
@@ -28,7 +27,6 @@ export default function GrafanaView() {
           </button>
 
           <button className="btn btn-primary" onClick={() => window.open('/grafana/', '_blank')}>
->>>>>>> upstream/main
             <ExternalLink size={16} /> Buka di Tab Baru
           </button>
         </div>
