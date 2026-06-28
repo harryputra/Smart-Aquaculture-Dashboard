@@ -82,3 +82,22 @@ export const getLeleSessions = (id) => req(`/devices/${id}/sessions`);
 export const getLeleErrors = (id) => req(`/devices/${id}/errors`);
 export const getTareHistory = (id) => req(`/devices/${id}/tare-history`);
 export const getSyncedSchedules = (id) => req(`/devices/${id}/schedules-synced`);
+
+// OTA firmware
+export const getFirmwareList = () => req('/firmware');
+export const deleteFirmware = (id) => req(`/firmware/${id}`, { method: 'DELETE' });
+export const setLatestFirmware = (id) => req(`/firmware/${id}/latest`, { method: 'PUT' });
+export const triggerOta = (deviceId, firmware_id) =>
+  req(`/devices/${deviceId}/ota`, { method: 'POST', body: firmware_id ? { firmware_id } : {} });
+
+export async function uploadFirmware({ file, model, version, notes }) {
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('model', model || 'pakan_lele');
+  fd.append('version', version);
+  if (notes) fd.append('notes', notes);
+  const res = await fetch('/api/lele/firmware', { method: 'POST', credentials: 'same-origin', body: fd });
+  if (res.status === 401) window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `HTTP ${res.status}`); }
+  return res.json();
+}

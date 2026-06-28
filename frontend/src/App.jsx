@@ -3,7 +3,7 @@ import { Routes, Route, NavLink, Link, useLocation } from 'react-router-dom';
 import {
   Home, Fish, Activity, BarChart3, Bell, Waves,
   Skull, Utensils, Settings, LayoutGrid, Cpu, Menu, X, Radio, Wrench, Plug, LogOut,
-  Users as UsersIcon,
+  Users as UsersIcon, ArrowUpCircle,
 } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import Farms from './pages/Farms';
@@ -16,6 +16,7 @@ import LeleFeeder from './pages/LeleFeeder';
 import MqttMonitor from './pages/MqttMonitor';
 import HardwareTest from './pages/HardwareTest';
 import Devices from './pages/Devices';
+import Firmware from './pages/Firmware';
 import Login from './pages/Login';
 import QuickLogin from './pages/QuickLogin';
 import Users from './pages/Users';
@@ -120,6 +121,9 @@ function Shell() {
           <NavLink to="/hardware-test" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
             <Wrench size={18} /> <span>Uji Hardware</span>
           </NavLink>
+          <NavLink to="/firmware" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
+            <ArrowUpCircle size={18} /> <span>Firmware (OTA)</span>
+          </NavLink>
         </div>
 
         <div className="sidebar-section">
@@ -173,6 +177,7 @@ function Shell() {
           <Route path="/mqtt-monitor" element={<MqttMonitor />} />
           <Route path="/hardware-test" element={<HardwareTest />} />
           <Route path="/devices" element={<Devices />} />
+          <Route path="/firmware" element={<Firmware />} />
           <Route path="/users" element={<Users />} />
         </Routes>
       </main>
