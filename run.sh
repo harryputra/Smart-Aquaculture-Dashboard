@@ -191,6 +191,31 @@ wait_health() {
   return 0
 }
 
+# ---------- migrasi DB (idempoten, aman diulang) ----------
+# init.sql hanya jalan saat volume DB pertama dibuat. Tabel yang ditambahkan
+# kemudian (mis. lele_*) dibuat lewat migrasi ini di SETIAP deploy (IF NOT EXISTS).
+MIGRATIONS=(
+  database/migration-full-v3-2.sql
+  database/migration-v3-2-3-schedfix.sql
+)
+apply_migrations() {
+  load_env
+  local u="${DB_USER:-aquaculture}" db="${DB_NAME:-aquaculture}" t=30
+  until dc exec -T postgres pg_isready -U "$u" -d "$db" >/dev/null 2>&1; do
+    t=$((t-1)); [ $t -le 0 ] && { warn "PostgreSQL belum siap — lewati migrasi."; return 0; }
+    sleep 1
+  done
+  log "Menerapkan migrasi DB (idempoten)..."
+  for m in "${MIGRATIONS[@]}"; do
+    [ -f "$m" ] || continue
+    if dc exec -T postgres psql -U "$u" -d "$db" < "$m" >/dev/null 2>&1; then
+      ok "migrasi: $(basename "$m")"
+    else
+      warn "migrasi $(basename "$m") ada peringatan (mungkin sebagian sudah ada)."
+    fi
+  done
+}
+
 # ---------- ringkasan ----------
 summary() {
   load_env
@@ -244,6 +269,7 @@ do_up() {
   log "Build & start stack (mode lokal/dev)..."
   dc up -d --build
   wait_health
+  apply_migrations
   summary "lokal"
   echo -e "  ${Y}Catatan:${N} ini mode lokal. Untuk SERVER pakai ${BOLD}./run.sh deploy${N}."
 }
@@ -258,6 +284,7 @@ do_deploy() {
   log "Build & start stack (detached, restart=unless-stopped, tahan reboot)..."
   dc up -d --build
   wait_health
+  apply_migrations
   summary "produksi"
   cloudflare_hint
 }
@@ -307,6 +334,7 @@ $(echo -e "${BOLD}${PROJECT} — runner${N}")
     logs [svc]      Ikuti log (semua / service tertentu)
     reset           HAPUS semua data (volume) lalu bersih
     doctor          Diagnosa prasyarat & port
+    migrate         Terapkan migrasi DB (idempoten) ke stack berjalan
     mqtt-passwd     (Re)generate mosquitto passwd dari .env
     mqtt-sub        Intip semua pesan MQTT yang masuk ke broker
     mqtt-test [id]  Kirim status device palsu (uji pipeline tanpa hardware)
@@ -336,6 +364,7 @@ case "$cmd" in
   prod-restart)       do_restart ;;
   reset|hard-reset)   do_reset ;;
   doctor)             do_doctor ;;
+  migrate|db-migrate) need_docker; apply_migrations; ok "Migrasi selesai." ;;
   mqtt-passwd)        need_docker; mqtt_passwd ;;
   mqtt-sub)           mqtt_sub ;;
   mqtt-test)          shift || true; mqtt_test "${1:-}" ;;
