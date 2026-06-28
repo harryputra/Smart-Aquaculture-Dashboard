@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Hand, CalendarClock, Sparkles, Utensils, Scale, Loader, CheckCircle } from 'lucide-react';
 import {
-  setFeedMode, getFeedProgress, remoteManualFeed, remoteFeedGram,
+  setFeedMode, getFeedProgress, remoteManualFeed, remoteFeedGram, setSpinner, testSpread,
 } from '../../services/leleApi';
 
 const MODES = [
@@ -22,6 +22,11 @@ export default function FeedControlSyncPanel({ device }) {
   const [gram, setGram] = useState('');
   const [progress, setProgress] = useState(null);
   const timer = useRef(null);
+  // pengaturan spinner (nilai awal dari status device)
+  const [spnHigh, setSpnHigh] = useState(live.spinner_pwm_high ?? 255);
+  const [spnLow, setSpnLow] = useState(live.spinner_pwm_low ?? 175);
+  const [spnDir, setSpnDir] = useState(live.spinner_dir_mode ?? 0);
+  const [spnSecs, setSpnSecs] = useState(5);
 
   // Poll progress penimbangan saat feeding (cepat) / idle (lambat).
   useEffect(() => {
@@ -52,6 +57,17 @@ export default function FeedControlSyncPanel({ device }) {
         await remoteFeedGram(deviceId, g);
       }
     } catch (e) { alert(e.message); } finally { setTimeout(() => setBusy(false), 600); }
+  }
+  async function saveSpinner() {
+    setBusy(true);
+    try { await setSpinner(deviceId, { pwm_high: spnHigh, pwm_low: spnLow, dir: spnDir }); }
+    catch (e) { alert(e.message); } finally { setTimeout(() => setBusy(false), 600); }
+  }
+  async function doTestSpread() {
+    if (!online) { alert('Device offline.'); return; }
+    setBusy(true);
+    try { await testSpread(deviceId, spnSecs); }
+    catch (e) { alert(e.message); } finally { setTimeout(() => setBusy(false), 600); }
   }
 
   const pct = progress && progress.target_g > 0
@@ -125,6 +141,36 @@ export default function FeedControlSyncPanel({ device }) {
           </div>
         </div>
         {feeding && <div className="text-xs text-muted" style={{ marginTop: 10 }}>Sedang feeding — tunggu selesai sebelum trigger baru.</div>}
+      </div>
+
+      {/* PENGATURAN SEBARAN (SPINNER) */}
+      <div className="card" style={{ marginTop: 24 }}>
+        <div className="card-header"><div><div className="card-title">Pengaturan Sebaran (Spinner)</div>
+          <div className="card-subtitle">Atur kecepatan & arah lemparan pakan — sinkron ke hardware</div></div></div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 12, marginBottom: 10 }}>
+          <div className="form-group" style={{ margin: 0 }}><label className="form-label">Kecepatan tinggi (lempar jauh)</label>
+            <input className="form-input" type="number" min="120" max="255" value={spnHigh} onChange={e => setSpnHigh(+e.target.value)} /></div>
+          <div className="form-group" style={{ margin: 0 }}><label className="form-label">Kecepatan rendah (lempar dekat)</label>
+            <input className="form-input" type="number" min="120" max="255" value={spnLow} onChange={e => setSpnLow(+e.target.value)} /></div>
+          <div className="form-group" style={{ margin: 0 }}><label className="form-label">Arah putar</label>
+            <select className="form-select" value={spnDir} onChange={e => setSpnDir(+e.target.value)}>
+              <option value={0}>Bolak-balik (merata)</option>
+              <option value={1}>Kanan (CW)</option>
+              <option value={2}>Kiri (CCW)</option>
+            </select></div>
+        </div>
+        <div className="text-xs text-muted" style={{ marginBottom: 12 }}>
+          Skala 120–255 (255 = paling kencang). Naikkan bila pakan tak sampai ke ujung depan.
+          {live.spinner_pwm_high != null && <> · Aktif di device: tinggi {live.spinner_pwm_high}, rendah {live.spinner_pwm_low}, arah {live.spinner_dir_mode === 1 ? 'kanan' : live.spinner_dir_mode === 2 ? 'kiri' : 'bolak-balik'}.</>}
+        </div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <button className="btn btn-primary" disabled={busy || !online} onClick={saveSpinner}>Simpan Pengaturan</button>
+          <div className="flex items-end gap-2" style={{ marginLeft: 'auto' }}>
+            <div className="form-group" style={{ margin: 0 }}><label className="form-label">Test (detik)</label>
+              <input className="form-input" type="number" min="1" max="15" value={spnSecs} onChange={e => setSpnSecs(+e.target.value)} style={{ width: 90 }} /></div>
+            <button className="btn btn-secondary" disabled={busy || !online || feeding} onClick={doTestSpread}>Test Sebar (tanpa pakan)</button>
+          </div>
+        </div>
       </div>
 
       <style>{`.spin{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}`}</style>

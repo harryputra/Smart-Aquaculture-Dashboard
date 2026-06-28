@@ -415,6 +415,26 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
     res.json({ success: true, mode });
   });
 
+  // Pengaturan spinner/sebaran: kecepatan tinggi/rendah + arah (0=bolak-balik,1=kanan,2=kiri).
+  app.post('/api/lele/devices/:deviceId/control/spinner', (req, res) => {
+    const cfg = {};
+    const b = req.body || {};
+    const clamp = (v) => Math.max(120, Math.min(255, parseInt(v)));
+    if (b.pwm_high != null) cfg.spinner_pwm_high = clamp(b.pwm_high);
+    if (b.pwm_low != null) cfg.spinner_pwm_low = clamp(b.pwm_low);
+    if (b.dir != null) { const d = parseInt(b.dir); if (d >= 0 && d <= 2) cfg.spinner_dir = d; }
+    if (!Object.keys(cfg).length) return res.status(400).json({ error: 'Tidak ada parameter spinner.' });
+    sendConfig(req.params.deviceId, cfg);
+    res.json({ success: true, ...cfg });
+  });
+
+  // Test sebar: putar spinner X detik tanpa pakan (kalibrasi).
+  app.post('/api/lele/devices/:deviceId/control/test-spread', (req, res) => {
+    const seconds = Math.max(1, Math.min(15, parseInt(req.body?.seconds) || 5));
+    sendCommand(req.params.deviceId, 'test_spread', { seconds });
+    res.json({ success: true, seconds });
+  });
+
   // ============================
   // REMOTE CONTROL
   // ============================

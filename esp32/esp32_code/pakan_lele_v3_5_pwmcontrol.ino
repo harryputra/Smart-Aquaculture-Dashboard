@@ -202,6 +202,10 @@ const float SPINNER_RAMP_CURVE = 1.0f;
 
 int     spinnerState      = 0;   // 0=stop, 1=CW, 2=CCW
 int     spinnerCurrentPWM = 0;   // duty cycle aktif (0-255), untuk MQTT status
+// Pengaturan sebaran (diatur dari dashboard/panel, tersimpan di Preferences):
+uint8_t spinnerPwmHigh = SPINNER_PWM_MAX;  // kecepatan "tinggi" (lempar jauh)
+uint8_t spinnerPwmLow  = SPINNER_PWM_MIN;  // kecepatan "rendah" (lempar dekat)
+int     spinnerDirMode = 0;                // 0=bolak-balik, 1=kanan(CW), 2=kiri(CCW)
 
 // =====================================================
 // CALIBRATION FACTOR
@@ -348,6 +352,7 @@ enum RemoteCmd {
   CMD_RESET_SAMPLES,
   CMD_START_SAMPLING,
   CMD_AUTO_GEN_SCHEDULE,
+  CMD_TEST_SPREAD,
   CMD_BTN_UP,
   CMD_BTN_DOWN,
   CMD_BTN_OK,
@@ -405,8 +410,8 @@ String mainMenu[MAIN_MENU_COUNT] = {
   "Jadwal Pakan", "Kalibrasi/Tare", "Riwayat Akhir", "Pengaturan"
 };
 
-const int FEED_MENU_COUNT = 3;
-String feedMenu[FEED_MENU_COUNT] = { "Mode Pakan", "Feed Manual", "Lihat Target" };
+const int FEED_MENU_COUNT = 4;
+String feedMenu[FEED_MENU_COUNT] = { "Mode Pakan", "Feed Manual", "Test Sebar", "Lihat Target" };
 
 const int BIOMASS_MENU_COUNT = 5;
 String biomassMenu[BIOMASS_MENU_COUNT] = {
@@ -503,6 +508,7 @@ String screenName();
 // V3.2.1: spinner PWM
 void setupSpinnerPWM();
 void spinnerUpdatePWM(int idx, uint8_t duty);
+void runTestSpread(int seconds);
 uint8_t spinnerPWMForDispense(float chamberGramCurrent, float batchTargetGram);
 
 // =====================================================
@@ -617,6 +623,9 @@ void loadSettings() {
 
   autoFeedEnabled = prefs.getBool("autoFeed", true);
   applyFeedMode(prefs.getInt("feedMode", autoFeedEnabled ? 1 : 0));  // migrasi dari setting autoFeed lama
+  spinnerPwmHigh = prefs.getInt("spnHigh", SPINNER_PWM_MAX);
+  spinnerPwmLow  = prefs.getInt("spnLow",  SPINNER_PWM_MIN);
+  spinnerDirMode = prefs.getInt("spnDir",  0);
 
   for (int i = 0; i < SCHEDULE_COUNT; i++) {
     char keyH[8], keyM[8], keyE[8];
@@ -650,6 +659,9 @@ void saveSettings() {
   prefs.putInt ("sampleTarget", targetSampleCount);
   prefs.putBool("autoFeed",     autoFeedEnabled);
   prefs.putInt ("feedMode",     feedMode);
+  prefs.putInt ("spnHigh",      spinnerPwmHigh);
+  prefs.putInt ("spnLow",       spinnerPwmLow);
+  prefs.putInt ("spnDir",       spinnerDirMode);
 
   for (int i = 0; i < SCHEDULE_COUNT; i++) {
     char keyH[8], keyM[8], keyE[8];
@@ -912,6 +924,10 @@ void onMqttMessage(const String& topic, const String& payload, const size_t size
     else if (strcmp(command, "reset_samples")    == 0) { pendingCmd.cmd = CMD_RESET_SAMPLES;    publishAck(command, true, "Reset queued"); }
     else if (strcmp(command, "start_sampling")   == 0) { pendingCmd.cmd = CMD_START_SAMPLING;   publishAck(command, true, "Sampling started"); }
     else if (strcmp(command, "auto_gen_schedule")== 0) { pendingCmd.cmd = CMD_AUTO_GEN_SCHEDULE; publishAck(command, true, "Schedule auto-gen queued"); }
+    else if (strcmp(command, "test_spread") == 0) {
+      pendingCmd.cmd = CMD_TEST_SPREAD; pendingCmd.intArg = doc["seconds"] | 5;
+      publishAck(command, true, "Test sebar queued");
+    }
     else if (strcmp(command, "open_valve")       == 0) { pendingCmd.cmd = CMD_OPEN_VALVE;       publishAck(command, true, "Servo open"); }
     else if (strcmp(command, "close_valve")      == 0) { pendingCmd.cmd = CMD_CLOSE_VALVE;      publishAck(command, true, "Servo close"); }
     else if (strcmp(command, "btn") == 0) {
@@ -974,6 +990,9 @@ void onMqttMessage(const String& topic, const String& payload, const size_t size
       int m = parseFeedMode(doc["feed_mode"] | "");
       if (m >= 0) { applyFeedMode(m); changed = true; }
     }
+    if (doc.containsKey("spinner_pwm_high")) { int v = doc["spinner_pwm_high"]; spinnerPwmHigh = constrain(v, 120, 255); changed = true; }
+    if (doc.containsKey("spinner_pwm_low"))  { int v = doc["spinner_pwm_low"];  spinnerPwmLow  = constrain(v, 120, 255); changed = true; }
+    if (doc.containsKey("spinner_dir"))      { int v = doc["spinner_dir"];      if (v >= 0 && v <= 2) { spinnerDirMode = v; changed = true; } }
     if (changed) {
       saveSettings();
       publishDeviceStatus(true);
@@ -1026,6 +1045,10 @@ void processPendingCommand() {
     case CMD_AUTO_GEN_SCHEDULE:
       autoGenerateSchedulesFromFeedingPerDay(); saveSettings();
       lcd.clear(); lcdLine(0,"WEB: SCHEDULE"); lcdLine(1,"Auto-generated"); delay(1000); lcd.clear();
+      break;
+    case CMD_TEST_SPREAD:
+      runTestSpread(pendingCmd.intArg > 0 ? pendingCmd.intArg : 5);
+      currentScreen = SCREEN_MAIN_MENU; lcd.clear();
       break;
     case CMD_OPEN_VALVE:
       servoOpen();
@@ -1091,6 +1114,9 @@ void publishDeviceStatus(bool forcePublish) {
   payload += "\"stepper_enabled\":"      + String(stepperEnabledState ? "true" : "false") + ",";
   payload += "\"spinner_state\":"        + String(spinnerState)                           + ",";
   payload += "\"spinner_pwm\":"          + String(spinnerCurrentPWM)                      + ","; // V3.2.1
+  payload += "\"spinner_pwm_high\":"     + String(spinnerPwmHigh)                         + ",";
+  payload += "\"spinner_pwm_low\":"      + String(spinnerPwmLow)                          + ",";
+  payload += "\"spinner_dir_mode\":"     + String(spinnerDirMode)                         + ",";
   payload += "\"next_schedule_hhmm\":\"" + nextScheduleHHMM()                             + "\",";
   payload += "\"seconds_to_next_feed\":" + String(secLeft)                                + ",";
   payload += "\"last_feed_success\":"    + String(lastFeedSuccess ? "true" : "false")     + ",";
@@ -1616,16 +1642,25 @@ void spinnerCCWPWM(uint8_t duty) {
   spinnerCurrentPWM = duty;
 }
 
-// Mulai spinner di kecepatan PENUH sesuai arah batch (untuk pre-start)
-void spinnerRunByBatch(int idx) {
-  if (idx % 2 == 0) spinnerCWPWM(SPINNER_PWM_MAX);
-  else              spinnerCCWPWM(SPINNER_PWM_MAX);
+// Arah putar untuk batch ke-idx sesuai mode (0=bolak-balik, 1=kanan/CW, 2=kiri/CCW)
+int spinnerDirForBatch(int idx) {
+  if (spinnerDirMode == 1) return 1;   // selalu CW (kanan)
+  if (spinnerDirMode == 2) return 2;   // selalu CCW (kiri)
+  return (idx % 2 == 0) ? 1 : 2;       // bolak-balik
+}
+void spinnerDrive(int idx, uint8_t duty) {
+  if (spinnerDirForBatch(idx) == 1) spinnerCWPWM(duty);
+  else                              spinnerCCWPWM(duty);
 }
 
-// Update kecepatan spinner tanpa mengubah arah (untuk ramp-down saat dispensing)
+// Mulai spinner di kecepatan tinggi sesuai mode arah (untuk pre-start)
+void spinnerRunByBatch(int idx) {
+  spinnerDrive(idx, spinnerPwmHigh);
+}
+
+// Update kecepatan spinner (arah mengikuti mode)
 void spinnerUpdatePWM(int idx, uint8_t duty) {
-  if (idx % 2 == 0) spinnerCWPWM(duty);
-  else              spinnerCCWPWM(duty);
+  spinnerDrive(idx, duty);
 }
 
 // =====================================================
@@ -1660,6 +1695,24 @@ void stopAllActuators() {
   stepperDisable();
   spinnerStop();
   servoClose();
+}
+
+// Test sebar: putar spinner TANPA mengeluarkan pakan (kalibrasi sebaran).
+void runTestSpread(int seconds) {
+  if (feedingInProgress) return;
+  int s = constrain(seconds, 1, 15);
+  servoClose();   // pastikan trapdoor tertutup (tak ada pakan keluar)
+  String dir = spinnerDirMode == 1 ? "KANAN" : (spinnerDirMode == 2 ? "KIRI" : "B-BALIK");
+  lcd.clear(); lcdLine(0, "TEST SEBAR " + dir); lcdLine(1, String(s) + "s PWM:" + String(spinnerPwmHigh));
+  spinnerDrive(0, spinnerPwmHigh);   // arah sesuai mode
+  unsigned long t0 = millis();
+  while (millis() - t0 < (unsigned long)s * 1000UL) {
+    maintainNetwork();
+    if (backPressed()) break;
+    delay(20);
+  }
+  spinnerStop();
+  lcd.clear(); lcdLine(0, "TEST SELESAI"); delay(800); lcd.clear();
 }
 
 // =====================================================
@@ -1837,8 +1890,8 @@ bool runSingleBatch(float targetGram, int batchIndex, int batchNo, int totalBatc
   //   Batch 3,4 (idx 2,3): (2/2)%2=1 -> PWM = 175, CW / CCW
   //   Batch 5,6 (idx 4,5): (4/2)%2=0 -> PWM = 255, CW / CCW
   //   Batch 7,8 (idx 6,7): (6/2)%2=1 -> PWM = 175, CW / CCW  ... dst
-  uint8_t batchPWM = ((batchIndex / 2) % 2 == 0) ? SPINNER_PWM_MAX : SPINNER_PWM_MIN;
-  String dirText   = (batchIndex % 2 == 0) ? "CW" : "CCW";
+  uint8_t batchPWM = ((batchIndex / 2) % 2 == 0) ? spinnerPwmHigh : spinnerPwmLow;
+  String dirText   = (spinnerDirForBatch(batchIndex) == 1) ? "CW" : "CCW";
   lcd.clear(); lcdLine(0,"SPINNER ON"); lcdLine(1,"Dir:" + dirText + " P:" + String(batchPWM));
   spinnerUpdatePWM(batchIndex, batchPWM);
   delay(SPINNER_PRESTART_MS);
@@ -2237,6 +2290,8 @@ void handleFeedMenu() {
         }
       }
     } else if (feedMenuIndex == 2) {
+      runTestSpread(5);
+    } else if (feedMenuIndex == 3) {
       currentScreen = SCREEN_FEED_TARGET_INFO; lcd.clear(); return;
     }
   }

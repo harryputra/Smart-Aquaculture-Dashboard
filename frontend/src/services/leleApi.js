@@ -30,6 +30,10 @@ export const remoteAutoFeed = (id, enabled) =>
 export const setFeedMode = (id, mode) =>
   req(`/devices/${id}/control/feed-mode`, { method: 'POST', body: { mode } });
 export const getFeedProgress = (id) => req(`/devices/${id}/feed-progress`);
+export const setSpinner = (id, data) =>
+  req(`/devices/${id}/control/spinner`, { method: 'POST', body: data });
+export const testSpread = (id, seconds) =>
+  req(`/devices/${id}/control/test-spread`, { method: 'POST', body: { seconds } });
 export const remoteTare = (id, scale_type) =>
   req(`/devices/${id}/control/tare`, { method: 'POST', body: { scale_type } });
 export const remoteResetSamples = (id) =>
