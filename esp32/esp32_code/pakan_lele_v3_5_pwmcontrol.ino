@@ -50,7 +50,11 @@ const char* MQTT_PATH     = "/";                    // mosquitto WebSocket di ro
 const char* MQTT_USER     = "aquaculture";          // samakan dgn .env server
 const char* MQTT_PASSWORD = "aquaculture123";       // GANTI bila MQTT_PASSWORD server diubah
 
-const char* DEVICE_ID = "pakan_lele_01";
+// ID device: kosongkan OVERRIDE → ID OTOMATIS dari MAC chip (unik per board;
+// flash firmware yang SAMA ke semua unit). Isi OVERRIDE utk paksa ID tertentu
+// (mis. mempertahankan ID lama "pakan_lele_01").
+const char* DEVICE_ID_OVERRIDE = "";
+String DEVICE_ID;   // diisi di setup() dari MAC / override
 
 // =====================================================
 // NTP CONFIG (Sinkronisasi Waktu WIB via Internet)
@@ -2642,6 +2646,16 @@ void setup() {
   Serial.begin(115200);
   delay(1500);
   Serial.println("\n=== PAKAN LELE ===");
+
+  // ID device otomatis dari MAC (unik per board), atau override bila diisi.
+  if (strlen(DEVICE_ID_OVERRIDE) > 0) {
+    DEVICE_ID = DEVICE_ID_OVERRIDE;
+  } else {
+    char idbuf[16];
+    sprintf(idbuf, "lele_%06x", (uint32_t)(ESP.getEfuseMac() & 0xFFFFFF));
+    DEVICE_ID = idbuf;
+  }
+  Serial.println("[BOOT] Device ID: " + DEVICE_ID);
 
   Serial.println("[BOOT] Step 1: GPIO init...");
   for (int i = 0; i < 4; i++) pinMode(buttons[i].pin, INPUT_PULLUP);

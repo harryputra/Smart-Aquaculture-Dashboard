@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Routes, Route, NavLink, Link, useLocation } from 'react-router-dom';
 import {
   Home, Fish, Activity, BarChart3, Bell, Waves,
-  Skull, Utensils, Settings, LayoutGrid, Cpu, Menu, X, Radio, Wrench,
+  Skull, Utensils, Settings, LayoutGrid, Cpu, Menu, X, Radio, Wrench, Plug,
 } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import Farms from './pages/Farms';
@@ -14,6 +14,7 @@ import Notifications from './pages/Notifications';
 import LeleFeeder from './pages/LeleFeeder';
 import MqttMonitor from './pages/MqttMonitor';
 import HardwareTest from './pages/HardwareTest';
+import Devices from './pages/Devices';
 import NotificationToasts from './components/NotificationToasts';
 import { getUnreadCount } from './services/api';
 
@@ -87,6 +88,9 @@ export default function App() {
           <NavLink to="/lele-feeder" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
             <Cpu size={18} /> <span>Pakan Lele</span>
           </NavLink>
+          <NavLink to="/devices" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
+            <Plug size={18} /> <span>Perangkat</span>
+          </NavLink>
           <NavLink to="/mqtt-monitor" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
             <Radio size={18} /> <span>MQTT Monitor</span>
           </NavLink>
@@ -118,6 +122,7 @@ export default function App() {
           <Route path="/lele-feeder" element={<LeleFeeder />} />
           <Route path="/mqtt-monitor" element={<MqttMonitor />} />
           <Route path="/hardware-test" element={<HardwareTest />} />
+          <Route path="/devices" element={<Devices />} />
         </Routes>
       </main>
     </div>

@@ -2,21 +2,24 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Plus, Droplets, Wifi, WifiOff, ArrowLeft, Trash2, X, MapPin } from 'lucide-react';
 import { getFarm, getPonds, createPond, deletePond } from '../services/api';
+import { getLeleDevices, assignLeleDevice } from '../services/leleApi';
 
 export default function FarmDetail() {
   const { farmId } = useParams();
   const [farm, setFarm] = useState(null);
   const [ponds, setPonds] = useState([]);
   const [showModal, setShowModal] = useState(false);
+  const [devices, setDevices] = useState([]);
   const [form, setForm] = useState({
-    name: '', fish_type: 'Lele', size_m2: 50, max_depth: 150, fish_count: 1000,
+    name: '', fish_type: 'Lele', size_m2: 50, max_depth: 150, fish_count: 1000, device_id: '',
   });
 
   async function load() {
     try {
-      const [f, p] = await Promise.all([getFarm(farmId), getPonds(farmId)]);
+      const [f, p, d] = await Promise.all([getFarm(farmId), getPonds(farmId), getLeleDevices().catch(() => [])]);
       setFarm(f);
       setPonds(p);
+      setDevices(d);
     } catch (e) { console.error(e); }
   }
 
@@ -25,9 +28,14 @@ export default function FarmDetail() {
   async function handleSubmit(e) {
     e.preventDefault();
     try {
-      await createPond({ ...form, farm_id: farmId, stocking_date: new Date().toISOString().split('T')[0] });
+      const { device_id, ...pondData } = form;
+      const created = await createPond({ ...pondData, farm_id: farmId, stocking_date: new Date().toISOString().split('T')[0] });
+      if (device_id && created?.pond_id) {
+        await assignLeleDevice(device_id, created.pond_id, null)
+          .catch(err => alert('Kolam dibuat, tapi pairing perangkat gagal: ' + err.message));
+      }
       setShowModal(false);
-      setForm({ name: '', fish_type: 'Lele', size_m2: 50, max_depth: 150, fish_count: 1000 });
+      setForm({ name: '', fish_type: 'Lele', size_m2: 50, max_depth: 150, fish_count: 1000, device_id: '' });
       load();
     } catch (e) { alert('Gagal: ' + e.message); }
   }
@@ -146,6 +154,21 @@ export default function FarmDetail() {
                   <label className="form-label">Kedalaman Max (cm)</label>
                   <input type="number" className="form-input" value={form.max_depth}
                     onChange={e => setForm({ ...form, max_depth: +e.target.value })} />
+                </div>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Hubungkan Perangkat (opsional)</label>
+                <select className="form-select" value={form.device_id}
+                  onChange={e => setForm({ ...form, device_id: e.target.value })}>
+                  <option value="">— Tanpa perangkat / pasang nanti —</option>
+                  {devices.filter(d => !d.pond_id).map(d => (
+                    <option key={d.device_id} value={d.device_id}>
+                      {(d.name || d.device_id)} {d.is_online ? '🟢 online' : '⚪ offline'}
+                    </option>
+                  ))}
+                </select>
+                <div className="text-xs text-muted" style={{ marginTop: 4 }}>
+                  Hanya perangkat yang belum di-assign. Bisa juga dihubungkan nanti via menu <strong>Perangkat</strong>.
                 </div>
               </div>
               <div className="modal-actions">
