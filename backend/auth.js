@@ -19,6 +19,37 @@ const signAccess = (u) => jwt.sign({ uid: u.user_id, role: u.role, org: u.org_id
 const signRefresh = (u) => jwt.sign({ uid: u.user_id, typ: 'refresh' }, SECRET, { expiresIn: '7d' });
 const publicUser = (u) => u && { user_id: u.user_id, email: u.email, name: u.name, role: u.role, org_id: u.org_id };
 
+// Path yang boleh diakses tanpa login.
+const OPEN_PATHS = [/^\/api\/auth\//, /^\/api\/quick-login/, /^\/api\/health$/, /^\/health$/];
+
+// Gerbang global: semua /api/ wajib login (kecuali OPEN_PATHS). Set req.auth.
+function authGate(req, res, next) {
+  if (req.method === 'OPTIONS') return next();
+  const p = req.path;
+  if (!p.startsWith('/api/')) return next();
+  if (OPEN_PATHS.some((re) => re.test(p))) return next();
+  const tok = req.cookies?.at;
+  if (!tok) return res.status(401).json({ error: 'Belum login.' });
+  try {
+    const d = jwt.verify(tok, SECRET);
+    if (d.typ !== 'access') throw new Error('typ');
+    req.auth = d;
+    next();
+  } catch { return res.status(401).json({ error: 'Sesi tidak valid / kedaluwarsa.' }); }
+}
+
+// Kebijakan peran kasar: Pengamat read-only; hapus (DELETE) hanya Pemilik+.
+function rolePolicy(req, res, next) {
+  if (!req.auth) return next(); // path terbuka
+  const role = req.auth.role;
+  const isWrite = !['GET', 'HEAD', 'OPTIONS'].includes(req.method);
+  if (role === 'pengamat' && isWrite)
+    return res.status(403).json({ error: 'Akun Pengamat hanya bisa melihat (read-only).' });
+  if (req.method === 'DELETE' && !['pemilik', 'superadmin'].includes(role))
+    return res.status(403).json({ error: 'Hanya Pemilik yang boleh menghapus.' });
+  next();
+}
+
 function registerAuthHandlers({ app, pool }) {
   const audit = (action, x = {}) => pool.query(
     `INSERT INTO auth_audit (action, user_id, email, ip, user_agent, detail) VALUES ($1,$2,$3,$4,$5,$6)`,
@@ -128,4 +159,4 @@ async function ensureBootstrap(pool) {
   }
 }
 
-module.exports = { registerAuthHandlers, ROLES };
+module.exports = { registerAuthHandlers, authGate, rolePolicy, ROLES };

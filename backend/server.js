@@ -21,6 +21,12 @@ app.use(bodyParser.json());
 app.use(cookieParser());
 app.set('trust proxy', 1);   // di belakang nginx/cloudflare → req.ip benar
 
+// Fase 2: gerbang auth global (semua /api wajib login kecuali auth/health/quick-login)
+// + kebijakan peran (pengamat read-only, hapus = pemilik+). Scoping tenant di tiap query.
+const { authGate, rolePolicy } = require('./auth');
+app.use(authGate);
+app.use(rolePolicy);
+
 // ============================
 // PostgreSQL
 // ============================
@@ -459,17 +465,24 @@ cron.schedule('* * * * *', async () => {
 // ----- Farms -----
 app.get('/api/farms', async (req, res) => {
   try {
+    const org = req.auth?.org || null;   // null = superadmin → semua organisasi
+    const params = [];
+    let where = '';
+    if (org) { params.push(org); where = `WHERE f.org_id = $1`; }
     const r = await pool.query(`
-      SELECT f.*, 
+      SELECT f.*,
         (SELECT COUNT(*) FROM ponds WHERE farm_id = f.farm_id) as pond_count
-      FROM farms f ORDER BY f.created_at DESC`);
+      FROM farms f ${where} ORDER BY f.created_at DESC`, params);
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/farms/:id', async (req, res) => {
   try {
-    const r = await pool.query(`SELECT * FROM farms WHERE farm_id = $1`, [req.params.id]);
+    const org = req.auth?.org || null;
+    const r = await pool.query(
+      `SELECT * FROM farms WHERE farm_id = $1 AND ($2::text IS NULL OR org_id = $2)`,
+      [req.params.id, org]);
     if (!r.rows.length) return res.status(404).json({ error: 'Not found' });
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -478,10 +491,11 @@ app.get('/api/farms/:id', async (req, res) => {
 app.post('/api/farms', async (req, res) => {
   try {
     const { name, location, owner, description } = req.body;
+    const org = req.auth?.org || req.body?.org_id || 'org_default';
     const farm_id = 'farm_' + Date.now().toString(36);
     const r = await pool.query(
-      `INSERT INTO farms (farm_id, name, location, owner, description) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [farm_id, name, location, owner, description]
+      `INSERT INTO farms (farm_id, name, location, owner, description, org_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [farm_id, name, location, owner, description, org]
     );
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -489,7 +503,11 @@ app.post('/api/farms', async (req, res) => {
 
 app.delete('/api/farms/:id', async (req, res) => {
   try {
-    await pool.query(`DELETE FROM farms WHERE farm_id = $1`, [req.params.id]);
+    const org = req.auth?.org || null;
+    const r = await pool.query(
+      `DELETE FROM farms WHERE farm_id = $1 AND ($2::text IS NULL OR org_id = $2)`,
+      [req.params.id, org]);
+    if (!r.rowCount) return res.status(404).json({ error: 'Not found / bukan milik organisasi Anda' });
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -500,10 +518,12 @@ app.get('/api/ponds', async (req, res) => {
     const { farm_id, include_archived } = req.query;
     let q = `SELECT p.*, ds.is_connected, ds.last_seen
              FROM ponds p
-             LEFT JOIN device_status ds ON p.pond_id = ds.pond_id`;
+             LEFT JOIN device_status ds ON p.pond_id = ds.pond_id
+             LEFT JOIN farms fa ON p.farm_id = fa.farm_id`;
     const params = [];
     const where = [];
     if (farm_id) { params.push(farm_id); where.push(`p.farm_id = $${params.length}`); }
+    if (req.auth?.org) { params.push(req.auth.org); where.push(`fa.org_id = $${params.length}`); }  // scoping tenant
     if (include_archived !== '1') where.push(`(p.is_active IS DISTINCT FROM FALSE)`);  // sembunyikan arsip
     if (where.length) q += ` WHERE ` + where.join(' AND ');
     q += ` ORDER BY p.created_at DESC`;
@@ -520,9 +540,10 @@ app.get('/api/ponds/:id', async (req, res) => {
            SELECT * FROM sensor_data WHERE pond_id = p.pond_id ORDER BY timestamp DESC LIMIT 1
         ) s) as latest_sensor,
         (SELECT row_to_json(t) FROM sensor_thresholds t WHERE t.pond_id = p.pond_id) as threshold
-      FROM ponds p 
+      FROM ponds p
       LEFT JOIN device_status ds ON p.pond_id = ds.pond_id
-      WHERE p.pond_id = $1`, [req.params.id]);
+      LEFT JOIN farms fa ON p.farm_id = fa.farm_id
+      WHERE p.pond_id = $1 AND ($2::text IS NULL OR fa.org_id = $2)`, [req.params.id, req.auth?.org || null]);
     if (!r.rows.length) return res.status(404).json({ error: 'Not found' });
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -556,7 +577,12 @@ app.put('/api/ponds/:id', async (req, res) => {
 
 app.delete('/api/ponds/:id', async (req, res) => {
   try {
-    await pool.query(`DELETE FROM ponds WHERE pond_id = $1`, [req.params.id]);
+    const org = req.auth?.org || null;
+    const r = await pool.query(
+      `DELETE FROM ponds WHERE pond_id = $1
+         AND ($2::text IS NULL OR farm_id IN (SELECT farm_id FROM farms WHERE org_id = $2))`,
+      [req.params.id, org]);
+    if (!r.rowCount) return res.status(404).json({ error: 'Not found / bukan milik organisasi Anda' });
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
