@@ -3,7 +3,7 @@ import { Routes, Route, NavLink, Link, useLocation } from 'react-router-dom';
 import {
   Home, Fish, Activity, BarChart3, Bell, Waves,
   Skull, Utensils, Settings, LayoutGrid, Cpu, Menu, X, Radio, Wrench, Plug, LogOut,
-  Users as UsersIcon, ArrowUpCircle,
+  Users as UsersIcon, ArrowUpCircle, MessageCircle,
 } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import Farms from './pages/Farms';
@@ -17,6 +17,7 @@ import MqttMonitor from './pages/MqttMonitor';
 import HardwareTest from './pages/HardwareTest';
 import Devices from './pages/Devices';
 import Firmware from './pages/Firmware';
+import WhatsApp from './pages/WhatsApp';
 import Login from './pages/Login';
 import QuickLogin from './pages/QuickLogin';
 import Users from './pages/Users';
@@ -142,6 +143,9 @@ function Shell() {
             <NavLink to="/users" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
               <UsersIcon size={18} /> <span>Pengguna</span>
             </NavLink>
+            <NavLink to="/whatsapp" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
+              <MessageCircle size={18} /> <span>Notifikasi WA</span>
+            </NavLink>
           </div>
         )}
 
@@ -179,6 +183,7 @@ function Shell() {
           <Route path="/devices" element={<Devices />} />
           <Route path="/firmware" element={<Firmware />} />
           <Route path="/users" element={<Users />} />
+          <Route path="/whatsapp" element={<WhatsApp />} />
         </Routes>
       </main>
     </div>

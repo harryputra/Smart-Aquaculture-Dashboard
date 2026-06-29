@@ -35,6 +35,16 @@ export const createOrg = (data) => req('/orgs', { method: 'POST', body: data });
 export const updateOrg = (id, data) => req(`/orgs/${id}`, { method: 'PUT', body: data });
 export const deleteOrg = (id) => req(`/orgs/${id}`, { method: 'DELETE' });
 
+// Notifikasi WhatsApp
+export const getWaConfig = () => req('/wa/config');
+export const setWaConfig = (data) => req('/wa/config', { method: 'PUT', body: data });
+export const getWaRecipients = (orgId) => req('/wa/recipients' + (orgId ? `?org_id=${encodeURIComponent(orgId)}` : ''));
+export const createWaRecipient = (data) => req('/wa/recipients', { method: 'POST', body: data });
+export const updateWaRecipient = (id, data) => req(`/wa/recipients/${id}`, { method: 'PUT', body: data });
+export const deleteWaRecipient = (id) => req(`/wa/recipients/${id}`, { method: 'DELETE' });
+export const testWaRecipient = (id) => req(`/wa/recipients/${id}/test`, { method: 'POST' });
+export const getWaLog = () => req('/wa/log');
+
 // Quick-Login
 export const getQuickLoginPublic = (token) =>
   req('/quick-login/public' + (token ? `?token=${encodeURIComponent(token)}` : ''));
