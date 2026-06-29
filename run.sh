@@ -202,6 +202,7 @@ MIGRATIONS=(
   database/migration-commissioning.sql
   database/migration-auth.sql
   database/migration-ota.sql
+  database/migration-whatsapp.sql
 )
 apply_migrations() {
   load_env

@@ -298,10 +298,19 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
   // Mark offline after 30s tanpa status
   setInterval(async () => {
     try {
-      await pool.query(
+      const off = await pool.query(
         `UPDATE lele_devices SET is_online = FALSE
-         WHERE is_online = TRUE AND last_seen < NOW() - INTERVAL '30 seconds'`
+         WHERE is_online = TRUE AND last_seen < NOW() - INTERVAL '30 seconds'
+         RETURNING device_id, pond_id, name`
       );
+      for (const d of off.rows) {
+        if (!d.pond_id) continue;   // tanpa kolam → tak bisa dipetakan ke notifikasi
+        await pool.query(
+          `INSERT INTO notifications (pond_id, type, category, title, message)
+           VALUES ($1,'risk','offline','Perangkat Offline',$2)`,
+          [d.pond_id, `Feeder ${d.name || d.device_id} terputus (tidak melapor > 30 detik).`]
+        ).catch(() => {});
+      }
       // Bersihkan log traffic lama (retensi 2 hari) agar DB tidak membengkak.
       await pool.query(`DELETE FROM lele_mqtt_traffic WHERE created_at < NOW() - INTERVAL '2 days'`);
     } catch (e) { /* */ }
