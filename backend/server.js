@@ -168,9 +168,9 @@ mqttClient.on('message', async (topic, message) => {
 async function saveSensorData(farm_id, pond_id, data, source = 'esp32') {
   try {
     await pool.query(
-      `INSERT INTO sensor_data (farm_id, pond_id, temperature, depth, dissolved_oxygen, turbidity, ph, source) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [farm_id, pond_id, data.temperature, data.depth, data.dissolved_oxygen, data.turbidity, data.ph, source]
+      `INSERT INTO sensor_data (farm_id, pond_id, temperature, depth, dissolved_oxygen, turbidity, ph, source, aerator_on)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [farm_id, pond_id, data.temperature, data.depth, data.dissolved_oxygen, data.turbidity, data.ph, source, data.aerator === true]
     );
 
     const point = new Point('aquaculture_sensors')
@@ -638,6 +638,50 @@ app.post('/api/control/:pondId/drain-cycle', async (req, res) => {
   try {
     await triggerAutoDrainCycle(req.params.pondId, 'Trigger manual oleh user');
     res.json({ success: true, message: 'Siklus drain-refill dimulai' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ---- Aerator (kendali DO) per kolam ----
+app.get('/api/aerator/:pondId', async (req, res) => {
+  try {
+    const t = (await pool.query(
+      `SELECT aerator_mode, aerator_do_on, aerator_do_off, aerator_manual_on
+       FROM sensor_thresholds WHERE pond_id = $1`, [req.params.pondId])).rows[0] || {};
+    const s = (await pool.query(
+      `SELECT aerator_on FROM sensor_data WHERE pond_id = $1 ORDER BY timestamp DESC LIMIT 1`, [req.params.pondId])).rows[0] || {};
+    res.json({ ...t, aerator_on: s.aerator_on ?? null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/aerator/:pondId', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const mode = ['auto', 'manual', 'off'].includes(b.mode) ? b.mode : 'auto';
+    const doOn = b.do_on != null ? parseFloat(b.do_on) : null;
+    const doOff = b.do_off != null ? parseFloat(b.do_off) : null;
+    const manualOn = !!b.manual_on;
+    const p = await pool.query(`SELECT farm_id FROM ponds WHERE pond_id = $1`, [req.params.pondId]);
+    if (!p.rows.length) return res.status(404).json({ error: 'Pond not found' });
+
+    await pool.query(
+      `UPDATE sensor_thresholds SET aerator_mode = $2,
+         aerator_do_on = COALESCE($3, aerator_do_on),
+         aerator_do_off = COALESCE($4, aerator_do_off),
+         aerator_manual_on = $5 WHERE pond_id = $1`,
+      [req.params.pondId, mode, doOn, doOff, manualOn]);
+
+    // Kirim config aktual ke device (firmware yang menjalankan logikanya).
+    const t = (await pool.query(
+      `SELECT aerator_mode, aerator_do_on, aerator_do_off, aerator_manual_on
+       FROM sensor_thresholds WHERE pond_id = $1`, [req.params.pondId])).rows[0];
+    mqttClient.publish(
+      `aquaculture/${p.rows[0].farm_id}/${req.params.pondId}/control`,
+      JSON.stringify({
+        command: 'set_aerator', mode: t.aerator_mode,
+        do_on: Number(t.aerator_do_on), do_off: Number(t.aerator_do_off),
+        manual_on: t.aerator_manual_on,
+      }));
+    res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

@@ -203,6 +203,7 @@ MIGRATIONS=(
   database/migration-auth.sql
   database/migration-ota.sql
   database/migration-whatsapp.sql
+  database/migration-aerator.sql
 )
 apply_migrations() {
   load_env
