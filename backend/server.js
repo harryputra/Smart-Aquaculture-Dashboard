@@ -641,6 +641,30 @@ app.post('/api/control/:pondId/drain-cycle', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Daftar perangkat kualitas air (per kolam) + status koneksi + nilai terbaru.
+app.get('/api/water-devices', async (req, res) => {
+  try {
+    const org = req.auth?.org || null;   // null = superadmin
+    const params = [];
+    let where = `WHERE (p.is_active IS DISTINCT FROM FALSE)`;
+    if (org) { params.push(org); where += ` AND fa.org_id = $1`; }
+    const r = await pool.query(`
+      SELECT p.pond_id, p.name, p.fish_type, p.device_mode, p.farm_id, fa.name AS farm_name,
+             ds.device_id, ds.is_connected, ds.last_seen, ds.ip_address, ds.rssi,
+             (SELECT row_to_json(s) FROM (
+                SELECT temperature, depth, dissolved_oxygen, turbidity, ph, created_at
+                FROM sensor_data WHERE pond_id = p.pond_id ORDER BY created_at DESC LIMIT 1
+             ) s) AS latest,
+             (SELECT row_to_json(t) FROM sensor_thresholds t WHERE t.pond_id = p.pond_id) AS threshold
+      FROM ponds p
+      LEFT JOIN device_status ds ON p.pond_id = ds.pond_id
+      LEFT JOIN farms fa ON p.farm_id = fa.farm_id
+      ${where}
+      ORDER BY ds.is_connected DESC NULLS LAST, p.name`, params);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Simulasi - khusus untuk dummy mode
 app.post('/api/control/:pondId/simulate', async (req, res) => {
   try {

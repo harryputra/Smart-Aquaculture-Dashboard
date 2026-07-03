@@ -17,6 +17,7 @@ import MqttMonitor from './pages/MqttMonitor';
 import HardwareTest from './pages/HardwareTest';
 import Devices from './pages/Devices';
 import Firmware from './pages/Firmware';
+import WaterDevices from './pages/WaterDevices';
 import WhatsApp from './pages/WhatsApp';
 import Login from './pages/Login';
 import QuickLogin from './pages/QuickLogin';
@@ -113,6 +114,9 @@ function Shell() {
           <NavLink to="/lele-feeder" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
             <Cpu size={18} /> <span>Pakan Lele</span>
           </NavLink>
+          <NavLink to="/water-devices" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
+            <Waves size={18} /> <span>Perangkat Air</span>
+          </NavLink>
           <NavLink to="/devices" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
             <Plug size={18} /> <span>Perangkat</span>
           </NavLink>
@@ -178,6 +182,7 @@ function Shell() {
           <Route path="/analytics" element={<GrafanaView />} />
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/lele-feeder" element={<LeleFeeder />} />
+          <Route path="/water-devices" element={<WaterDevices />} />
           <Route path="/mqtt-monitor" element={<MqttMonitor />} />
           <Route path="/hardware-test" element={<HardwareTest />} />
           <Route path="/devices" element={<Devices />} />

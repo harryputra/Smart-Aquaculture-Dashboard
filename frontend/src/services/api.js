@@ -75,6 +75,7 @@ export const controlValve = (pondId, command, source = 'manual') =>
   req(`/control/${pondId}/valve`, { method: 'POST', body: { command, source } });
 export const triggerDrainCycle = (pondId) =>
   req(`/control/${pondId}/drain-cycle`, { method: 'POST' });
+export const getWaterDevices = () => req('/water-devices');
 export const sendSimulation = (pondId, data) =>
   req(`/control/${pondId}/simulate`, { method: 'POST', body: data });
 
