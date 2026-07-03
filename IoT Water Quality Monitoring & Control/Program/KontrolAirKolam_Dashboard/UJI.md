@@ -72,6 +72,15 @@ docker compose exec postgres psql -U aquaculture aquaculture \
 - [ ] Putar **level** turun ≤ 30 → pindah **ISI**; naik ≥ 80 → **SELESAI**.
 - [ ] Ketik `M` untuk kembali manual.
 
+## 9b. Uji aerator (DO)
+- [ ] Pasang relay aerator di **GPIO 27**.
+- [ ] Di Detail Kolam → Operasional → kartu **Aerator**, set mode **Auto**
+      (do_on 3.0 / do_off 4.0) → Simpan.
+- [ ] Putar potensio **DO** ke **≤ 3.0** → relay aerator **ON** (lihat SM & status
+      "Aerator: ON" di dashboard).
+- [ ] Putar DO ke **≥ 4.0** → aerator **OFF**. (Di antara 3–4 mempertahankan status.)
+- [ ] Set mode **Manual** → tombol ON/OFF aerator di dashboard menyalakan/mematikan relay.
+
 ## 10. Troubleshooting
 | Gejala | Solusi |
 |---|---|

@@ -19,6 +19,7 @@
 #include <WiFi.h>
 #include <WebSocketsClient.h>
 #include <MQTTPubSubClient.h>
+#include <ArduinoJson.h>          // parsing perintah kontrol (valve/aerator)
 #include "Parameter.h"
 
 // === Transport ===
@@ -46,6 +47,13 @@ float sensorWaterLevel = 50.0;
 // === STATE MACHINE OTOMATIS ===
 int langkahOtomatis = LANGKAH_CEK_KUALITAS;
 
+// === AERATOR (kendali DO) ===
+int   aeratorMode     = 1;      // 0=off, 1=auto (histeresis DO), 2=manual
+float aeratorDoOn     = AERATOR_DO_ON_DEFAULT;
+float aeratorDoOff    = AERATOR_DO_OFF_DEFAULT;
+bool  aeratorManualOn = false;  // status saat mode manual
+bool  aeratorOn       = false;  // status aktual relay aerator
+
 // === TIMING ===
 unsigned long lastPublish    = 0;
 unsigned long lastStatus     = 0;
@@ -60,8 +68,10 @@ void setup() {
   pinMode(PIN_BUTTON_ISI,   INPUT_PULLUP);
   pinMode(PIN_VALVE_KURAS,  OUTPUT);
   pinMode(PIN_VALVE_ISI,    OUTPUT);
+  pinMode(PIN_AERATOR,      OUTPUT);
   digitalWrite(PIN_VALVE_KURAS, HIGH);   // relay Active-LOW → OFF
   digitalWrite(PIN_VALVE_ISI,   HIGH);
+  digitalWrite(PIN_AERATOR,     HIGH);
 
   analogReadResolution(12);              // ESP32 ADC 12-bit (0..4095)
 
@@ -100,6 +110,8 @@ void loop() {
 
   if (modeOtomatis) runAutomaticMode();
   else              runManualMode();
+
+  updateAerator();   // kendali aerator (auto DO / manual) — independen dari valve
 
   // Log valve saat berubah
   if (valveKurasState != valveKurasStateLama || valveIsiState != valveIsiStateLama) {

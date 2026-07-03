@@ -63,3 +63,21 @@ bool kualitasAirBuruk() {
 float mapFloat(long x, long in_min, long in_max, float out_min, float out_max) {
   return (float)(x - in_min) * (out_max - out_min) / (float)(in_max - in_min) + out_min;
 }
+
+// ======================================================================
+// AERATOR — kendali oksigen (DO). Berjalan di device (aman walau internet
+// putus). Mode: 0=off, 1=auto (histeresis DO), 2=manual.
+// ======================================================================
+void updateAerator() {
+  if (aeratorMode == 0) {
+    aeratorOn = false;
+  } else if (aeratorMode == 2) {
+    aeratorOn = aeratorManualOn;
+  } else {
+    // AUTO histeresis: nyala bila DO ≤ do_on, mati bila DO ≥ do_off,
+    // di antara keduanya → pertahankan status (cegah relay klik-klik).
+    if (sensorOxygen <= aeratorDoOn)      aeratorOn = true;
+    else if (sensorOxygen >= aeratorDoOff) aeratorOn = false;
+  }
+  digitalWrite(PIN_AERATOR, aeratorOn ? LOW : HIGH);   // relay Active-LOW
+}

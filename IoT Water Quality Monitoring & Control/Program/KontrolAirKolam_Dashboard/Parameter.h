@@ -45,6 +45,7 @@
 #define PIN_BUTTON_ISI      26   // tombol lokal isi   (INPUT_PULLUP)
 #define PIN_VALVE_KURAS     16   // relay kuras/outlet (Active-LOW)
 #define PIN_VALVE_ISI       17   // relay isi/inlet    (Active-LOW)
+#define PIN_AERATOR         27   // relay aerator/blower (Active-LOW)
 
 #define ADC_MAX             4095  // ESP32 = 12-bit
 
@@ -69,6 +70,11 @@ const float TEMP_IDEAL_MIN   = 22.0, TEMP_IDEAL_MAX = 32.0;
 // Target level saat siklus kuras→isi
 const float levelDrainTarget = 30.0;   // kuras sampai ≤ 30 cm
 const float levelFillTarget  = 80.0;   // isi sampai ≥ 80 cm
+
+// Aerator (histeresis DO): ON bila DO ≤ do_on, OFF bila DO ≥ do_off.
+// Nilai ini bisa diubah dari dashboard (perintah set_aerator).
+const float AERATOR_DO_ON_DEFAULT  = 3.0;   // mg/L
+const float AERATOR_DO_OFF_DEFAULT = 4.0;   // mg/L
 
 // ----------------------------------------------------------------------
 // 6) LANGKAH STATE MACHINE OTOMATIS

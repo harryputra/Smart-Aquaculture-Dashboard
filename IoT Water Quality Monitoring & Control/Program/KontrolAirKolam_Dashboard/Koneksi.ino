@@ -61,7 +61,8 @@ void publishSensors() {
   p += "\"depth\":"            + String(sensorWaterLevel, 1) + ",";
   p += "\"dissolved_oxygen\":" + String(sensorOxygen, 2)     + ",";
   p += "\"turbidity\":"        + String(sensorTurbidity, 1)  + ",";
-  p += "\"ph\":"               + String(sensorPH, 2);
+  p += "\"ph\":"               + String(sensorPH, 2)         + ",";
+  p += "\"aerator\":"          + String(aeratorOn ? "true" : "false");
   p += "}";
   mqttClient.publish(topicSensors, p);
 }
@@ -84,12 +85,24 @@ static void forceManual() { modeOtomatis = false; modeOtomatisLama = false; }
 // Catatan: cek "set_mode" dulu agar kata "auto" pada field source tidak salah tafsir.
 void onControl(const String& payload) {
   Serial.println("[CTRL] " + payload);
-  if (payload.indexOf("set_mode") >= 0) {
-    modeOtomatis = (payload.indexOf("auto") >= 0);
-    return;
+  StaticJsonDocument<256> doc;
+  if (deserializeJson(doc, payload)) return;     // JSON tak valid → abaikan
+  const char* cmd = doc["command"] | "";
+
+  if (strcmp(cmd, "set_mode") == 0) {            // {command:set_mode, mode:auto|manual}
+    modeOtomatis = (strcmp(doc["mode"] | "", "auto") == 0);
   }
-  if (payload.indexOf("open_valve") >= 0)        { forceManual(); desiredKuras = true;  desiredIsi = false; }
-  else if (payload.indexOf("close_valve") >= 0)  { forceManual(); desiredKuras = false; }
-  else if (payload.indexOf("open_inlet") >= 0)   { forceManual(); desiredIsi = true;  desiredKuras = false; }
-  else if (payload.indexOf("close_inlet") >= 0)  { forceManual(); desiredIsi = false; }
+  else if (strcmp(cmd, "open_valve") == 0)  { forceManual(); desiredKuras = true;  desiredIsi = false; }
+  else if (strcmp(cmd, "close_valve") == 0) { forceManual(); desiredKuras = false; }
+  else if (strcmp(cmd, "open_inlet") == 0)  { forceManual(); desiredIsi = true;  desiredKuras = false; }
+  else if (strcmp(cmd, "close_inlet") == 0) { forceManual(); desiredIsi = false; }
+  else if (strcmp(cmd, "set_aerator") == 0) {    // config aerator dari dashboard
+    const char* m = doc["mode"] | "";
+    if      (strcmp(m, "off") == 0)    aeratorMode = 0;
+    else if (strcmp(m, "manual") == 0) aeratorMode = 2;
+    else if (strcmp(m, "auto") == 0)   aeratorMode = 1;
+    if (doc.containsKey("do_on"))     aeratorDoOn     = doc["do_on"];
+    if (doc.containsKey("do_off"))    aeratorDoOff    = doc["do_off"];
+    if (doc.containsKey("manual_on")) aeratorManualOn = doc["manual_on"];
+  }
 }

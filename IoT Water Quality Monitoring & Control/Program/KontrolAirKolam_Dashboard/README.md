@@ -19,6 +19,7 @@ Logika inti (mode Manual/Auto, state machine kuras→isi, setpoint) **dipertahan
 ## Library (Arduino IDE → Library Manager)
 - **WebSockets** by *Markus Sattler (Links2004)*
 - **MQTTPubSubClient** by *hideakitai*
+- **ArduinoJson** by *Benoit Blanchon* (parsing perintah kontrol/aerator)
 - Board: **ESP32 Dev Module** (install "esp32 by Espressif").
 
 ## Wiring (ESP32)
@@ -33,6 +34,7 @@ Logika inti (mode Manual/Auto, state machine kuras→isi, setpoint) **dipertahan
 | Tombol Isi | GPIO 26 | ke GND, `INPUT_PULLUP` |
 | Relay Kuras (outlet) | GPIO 16 | **Active-LOW** |
 | Relay Isi (inlet) | GPIO 17 | **Active-LOW** |
+| Relay Aerator (blower/kincir) | GPIO 27 | **Active-LOW** |
 
 > Tiap potensio: kaki luar ke **3V3** & **GND**, kaki tengah ke pin ADC.
 > ⚠️ Jangan pakai pin ADC2 (GPIO 0/2/4/12–15/25–27) untuk analog saat WiFi aktif.
@@ -64,6 +66,17 @@ Ada **dua cara**, pilih salah satu sesuai kebutuhan:
   **jadwal kuras** juga otomatis mengirim perintah ini.
 
 > Tombol fisik selalu bisa dipakai (jog manual) kapan pun.
+
+## Aerator (kendali oksigen / DO)
+Relay aerator (GPIO 27) dikendalikan **di device** (aman walau internet putus):
+- **Auto (histeresis DO)**: aerator **ON** bila DO ≤ `do_on` (default 3.0 mg/L),
+  **OFF** bila DO ≥ `do_off` (default 4.0). Ambang di antaranya menahan status agar
+  relay tak klik-klik.
+- **Manual**: ON/OFF paksa dari dashboard.
+- Config & mode dikirim dashboard via `set_aerator`
+  (`{command:"set_aerator","mode":"auto|manual|off","do_on":..,"do_off":..,"manual_on":..}`).
+- Status aerator dikirim di payload sensor (`"aerator":true/false`) → tampil di
+  Detail Kolam (Operasional).
 
 ## Format data (untuk referensi)
 Device mengirim ke `aquaculture/<FARM_ID>/<POND_ID>/sensors`:
