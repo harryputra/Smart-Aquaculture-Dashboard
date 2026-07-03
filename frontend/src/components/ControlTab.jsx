@@ -4,6 +4,7 @@ import {
   Thermometer, Ruler, Droplet, Eye, Beaker,
 } from 'lucide-react';
 import { controlValve, triggerDrainCycle } from '../services/api';
+import AeratorControl from './AeratorControl';
 
 const SENSOR_META = {
   temperature: { name: 'Suhu', icon: Thermometer, unit: '°C', color: '#ef4444' },
@@ -141,6 +142,8 @@ export default function ControlTab({ pond, onChange }) {
           <RefreshCw size={16} /> Mulai Siklus Otomatis
         </button>
       </div>
+
+      <AeratorControl pondId={pond.pond_id} />
 
       <div className="card" style={{ marginTop: 16 }}>
         <div className="card-header">
