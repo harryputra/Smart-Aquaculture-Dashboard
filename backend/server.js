@@ -652,8 +652,8 @@ app.get('/api/water-devices', async (req, res) => {
       SELECT p.pond_id, p.name, p.fish_type, p.device_mode, p.farm_id, fa.name AS farm_name,
              ds.device_id, ds.is_connected, ds.last_seen, ds.ip_address, ds.rssi,
              (SELECT row_to_json(s) FROM (
-                SELECT temperature, depth, dissolved_oxygen, turbidity, ph, created_at
-                FROM sensor_data WHERE pond_id = p.pond_id ORDER BY created_at DESC LIMIT 1
+                SELECT temperature, depth, dissolved_oxygen, turbidity, ph, timestamp
+                FROM sensor_data WHERE pond_id = p.pond_id ORDER BY timestamp DESC LIMIT 1
              ) s) AS latest,
              (SELECT row_to_json(t) FROM sensor_thresholds t WHERE t.pond_id = p.pond_id) AS threshold
       FROM ponds p

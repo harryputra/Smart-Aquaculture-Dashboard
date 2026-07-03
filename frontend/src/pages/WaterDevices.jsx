@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   Droplets, Wifi, WifiOff, ArrowDownToLine, ArrowUpFromLine, Square, RefreshCw, Radio,
 } from 'lucide-react';
-import { getWaterDevices, controlValve, triggerDrainCycle } from '../services/api';
+import { getWaterDevices, controlValve, triggerDrainCycle, getSensorHistory } from '../services/api';
 import { useCan } from '../context/AuthContext';
 
 const PARAMS = [
@@ -27,13 +27,48 @@ function evalParam(key, val, t) {
 }
 const COLOR = { ok: { bg: 'var(--bg-tertiary)', c: 'var(--text-primary)' }, warn: { bg: '#fef3c7', c: '#92400e' }, bad: { bg: '#fee2e2', c: '#b91c1c' } };
 
+// Sparkline SVG mini dari deret angka.
+function Spark({ values, color = '#3b82f6' }) {
+  const nums = (values || []).filter(v => v != null).map(Number);
+  if (nums.length < 2) return <div style={{ height: 16 }} />;
+  const w = 62, h = 16, min = Math.min(...nums), max = Math.max(...nums), rng = (max - min) || 1;
+  const pts = nums.map((v, i) => {
+    const x = (i / (nums.length - 1)) * w;
+    const y = h - ((v - min) / rng) * (h - 2) - 1;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: 'block', margin: '3px auto 0', opacity: 0.75 }}>
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export default function WaterDevices() {
   const { canWrite } = useCan();
   const [devices, setDevices] = useState([]);
+  const [hist, setHist] = useState({});
   const [busy, setBusy] = useState('');
 
   async function load() { try { setDevices(await getWaterDevices()); } catch (e) { /* */ } }
   useEffect(() => { load(); const t = setInterval(load, 3000); return () => clearInterval(t); }, []);
+
+  // Riwayat untuk sparkline (lebih jarang: tiap 30 dtk).
+  const pondKey = devices.map(d => d.pond_id).join(',');
+  useEffect(() => {
+    const ids = devices.map(d => d.pond_id);
+    if (!ids.length) return;
+    let active = true;
+    async function fetchHist() {
+      const entries = await Promise.all(ids.map(async id => {
+        try { return [id, await getSensorHistory(id, 30)]; } catch { return [id, []]; }
+      }));
+      if (active) setHist(Object.fromEntries(entries));
+    }
+    fetchHist();
+    const t = setInterval(fetchHist, 30000);
+    return () => { active = false; clearInterval(t); };
+  }, [pondKey]);
 
   async function valve(pondId, command) {
     setBusy(pondId + command);
@@ -90,6 +125,7 @@ export default function WaterDevices() {
                         <div style={{ fontWeight: 700, fontSize: 15 }}>
                           {v != null ? Number(v).toFixed(p.dec) : '–'}<span style={{ fontSize: 9, opacity: 0.7 }}> {p.unit}</span>
                         </div>
+                        <Spark values={(hist[d.pond_id] || []).map(r => r[p.key])} color={st.c} />
                       </div>
                     );
                   })}
