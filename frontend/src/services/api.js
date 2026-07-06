@@ -78,6 +78,7 @@ export const triggerDrainCycle = (pondId) =>
 export const getWaterDevices = () => req('/water-devices');
 export const getAerator = (pondId) => req(`/aerator/${pondId}`);
 export const setAerator = (pondId, data) => req(`/aerator/${pondId}`, { method: 'PUT', body: data });
+export const getCycleCompare = () => req('/cycles/compare');
 export const sendSimulation = (pondId, data) =>
   req(`/control/${pondId}/simulate`, { method: 'POST', body: data });
 

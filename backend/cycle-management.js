@@ -70,6 +70,31 @@ function registerCycleHandlers({ app, pool }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // ---- Perbandingan antar-kolam (KPI siklus aktif) ----
+  app.get('/api/cycles/compare', async (req, res) => {
+    try {
+      const org = req.auth?.org || null;   // null = superadmin
+      const params = [];
+      let where = `WHERE (p.is_active IS DISTINCT FROM FALSE)`;
+      if (org) { params.push(org); where += ` AND fa.org_id = $${params.length}`; }
+      const ponds = (await pool.query(
+        `SELECT p.pond_id, p.name AS pond_name, p.fish_type, fa.name AS farm_name
+         FROM ponds p LEFT JOIN farms fa ON p.farm_id = fa.farm_id ${where}
+         ORDER BY fa.name, p.name`, params)).rows;
+
+      const out = [];
+      for (const p of ponds) {
+        const c = (await pool.query(
+          `SELECT * FROM pond_cycles WHERE pond_id=$1 AND status='active' ORDER BY start_date DESC LIMIT 1`,
+          [p.pond_id])).rows[0];
+        if (!c) { out.push({ ...p, has_cycle: false }); continue; }
+        const m = await cycleMetrics(c);
+        out.push({ ...p, has_cycle: true, target_weight_g: c.target_weight_g, initial_stock: c.initial_stock, ...m });
+      }
+      res.json(out);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   // ---- Mulai siklus baru ----
   app.post('/api/ponds/:pondId/cycle', async (req, res) => {
     const pondId = req.params.pondId;

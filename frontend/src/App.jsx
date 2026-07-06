@@ -19,6 +19,7 @@ import Devices from './pages/Devices';
 import Firmware from './pages/Firmware';
 import WaterDevices from './pages/WaterDevices';
 import WhatsApp from './pages/WhatsApp';
+import ComparePonds from './pages/ComparePonds';
 import Login from './pages/Login';
 import QuickLogin from './pages/QuickLogin';
 import Users from './pages/Users';
@@ -139,6 +140,9 @@ function Shell() {
           <NavLink to="/analytics" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
             <BarChart3 size={18} /> <span>Grafana Analytics</span>
           </NavLink>
+          <NavLink to="/compare" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
+            <LayoutGrid size={18} /> <span>Perbandingan Kolam</span>
+          </NavLink>
         </div>
 
         {canManageUsers && (
@@ -180,6 +184,7 @@ function Shell() {
           <Route path="/ponds/:pondId" element={<PondDetail />} />
           <Route path="/simulation" element={<Simulation />} />
           <Route path="/analytics" element={<GrafanaView />} />
+          <Route path="/compare" element={<ComparePonds />} />
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/lele-feeder" element={<LeleFeeder />} />
           <Route path="/water-devices" element={<WaterDevices />} />
