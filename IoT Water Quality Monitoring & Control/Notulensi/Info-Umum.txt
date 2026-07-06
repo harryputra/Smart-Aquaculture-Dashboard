@@ -1,0 +1,31 @@
+INFO INFO Umum Proyek
+
+Referensi Proyek: EFishery
+Satu alat TA dibuat 3 judul
+	1. Judul 1 untuk Feeder (sudah aman-semhas)
+		PR di penyebaran pakan kurang lebar
+			Jangan dipikirin dulu
+	2. ->>>> Judul 2 yang sedang dikerjakan sekarang
+		Monitoring and Control Water Quality and Quantity
+		ini yang sedang dikerjakan
+	3. Judul 3 integrasi Hardware dan Sofware
+		No Info
+		
+Anak TA nya ilang ilangan
+Deadline Agustus harus udah ke USER
+USER ada di ciwaruga - dekat PoltekPos	
+Plant di Kolam ikan lele
+
+Pengennya:
+	Belajar GIT/GITHUB
+		Agar perubahan program bisa dipantau langsung bersama
+	Belajar OTA
+		Agar Upload Program tak perlu ke tempat (cloud)
+	Belajar Millis
+		Sebagai Interrupt
+
+Jobdesk Bagas:
+	1. Hardware
+	2. Assembly 
+	3. Terjun Lapangan (ciwaruga)
+

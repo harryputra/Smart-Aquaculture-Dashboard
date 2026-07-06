@@ -1,0 +1,46 @@
+Water Level Control From Water Quality Monitoring
+
+\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+Alat dan Bahan :
+Input
+   A. Water Quality	
+	1. Turbidity sensor = kekeruhan air kolam
+	2. Dissolved oxygen sensor = kadar oksigen air
+	3. pH sensor = kadar asam basa air
+   B. Water Quantity
+	4. Ultrasonic = ketinggian air
+	
+Output
+1. Relay
+2. Solenoid Valve 2 unit ( 1/2 inch dan 2 inch )
+	A. Solenoid Input Air
+	B. Solenoid Kuras Air
+
+\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+Sistem Permintaan User
+1. [MANUAL] Pengurasan air langsung dari user via web (digital logic only on off)
+2. [AUTO] Pengurasan air dan pengisian air berdasarkan parameter nilai yang dihasilkan oleh kombinasi sensor diatas
+
+
+Alur Kerja Sistem Untuk Poin 2 [AUTO]
+Water Quantity
+1. if ultrasonik deteksi level air dibawah batas minimum then pompa on | dan sebaliknya
+
+Water Quality
+1. if turbidity, pH, oxygen dibawah batas minimum then valve keluaran on dan balik ke poin 1 -> harapnya biar airnya jadi jernih kembali
+
+\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+Nilai dummy
+
+Kolam min : 30 cm
+Kolam max : 80 cm
+
+Nilai sensor :
+1. pH min 3 max 6 (real)
+2. turbity min 120 max 180 (ADC)
+3. Oxygen - PR teh Adin
+
+1. Point 2 = pembacaan sensor min max
+2. Time valve on/off based on pembacaan ultrasonic (point 1)
+
+
