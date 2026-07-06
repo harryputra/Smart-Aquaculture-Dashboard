@@ -52,11 +52,21 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
     try {
       const payload = JSON.parse(_raw);
       const deviceId = payload.device_id || 'unknown';
-      const pondR = await pool.query(`SELECT pond_id FROM lele_devices WHERE device_id = $1`, [deviceId]);
+      const pondR = await pool.query(`SELECT pond_id, is_online FROM lele_devices WHERE device_id = $1`, [deviceId]);
       const pondId = pondR.rows[0]?.pond_id || null;
+      const wasOffline = pondR.rows[0]?.is_online === false;   // untuk deteksi "kembali online"
 
       if (topic === 'lele/device/status') {
         liveDataCache[deviceId] = { ...payload, received_at: new Date() };
+
+        // Transisi OFFLINE → ONLINE = perangkat pulih (internet/listrik kembali).
+        if (wasOffline && pondId) {
+          await pool.query(
+            `INSERT INTO notifications (pond_id, type, category, title, message)
+             VALUES ($1,'success','offline','Perangkat Kembali Online',$2)`,
+            [pondId, `Feeder ${payload.device_id} kembali terhubung (internet & listrik pulih).`]
+          ).catch(() => {});
+        }
 
         await pool.query(`
           INSERT INTO lele_devices (
@@ -308,7 +318,7 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
         await pool.query(
           `INSERT INTO notifications (pond_id, type, category, title, message)
            VALUES ($1,'risk','offline','Perangkat Offline',$2)`,
-          [d.pond_id, `Feeder ${d.name || d.device_id} terputus (tidak melapor > 30 detik).`]
+          [d.pond_id, `Feeder ${d.name || d.device_id} tidak melapor > 30 detik — kemungkinan INTERNET atau LISTRIK terputus. (Jadwal pakan tetap jalan lokal via RTC.)`]
         ).catch(() => {});
       }
       // Bersihkan log traffic lama (retensi 2 hari) agar DB tidak membengkak.
