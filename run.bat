@@ -89,6 +89,55 @@ if exist ".env" (
 )
 exit /b 0
 
+:get_dbvars
+set "DB_USER=aquaculture"
+set "DB_NAME=aquaculture"
+if exist ".env" (
+  for /f "usebackq tokens=1,2 delims==" %%A in (".env") do (
+    if /i "%%A"=="DB_USER" set "DB_USER=%%B"
+    if /i "%%A"=="DB_NAME" set "DB_NAME=%%B"
+  )
+)
+exit /b 0
+
+REM Terapkan migrasi DB (idempoten) lalu restart backend agar admin/demo ter-seed.
+:domigrate
+call :get_dbvars
+echo [..] Menunggu PostgreSQL siap...
+set /a _pg=0
+:pgwait
+%DC% exec -T postgres pg_isready -U !DB_USER! -d !DB_NAME! >nul 2>&1
+if not errorlevel 1 goto :pgok
+set /a _pg+=1
+if !_pg! geq 30 ( echo [WARN] Postgres belum siap - lewati migrasi. & exit /b 0 )
+timeout /t 1 /nobreak >nul
+goto :pgwait
+:pgok
+echo [..] Menerapkan migrasi DB...
+call :runsql migration-full-v3-2.sql
+call :runsql migration-v3-2-3-schedfix.sql
+call :runsql migration-lele-traffic.sql
+call :runsql migration-budidaya.sql
+call :runsql migration-commissioning.sql
+call :runsql migration-auth.sql
+call :runsql migration-ota.sql
+call :runsql migration-whatsapp.sql
+call :runsql migration-aerator.sql
+call :runsql migration-feedlevel.sql
+call :runsql migration-wa-providers.sql
+call :runsql migration-wa-providers2.sql
+echo [..] Restart backend (seed admin/demo setelah tabel ada)...
+%DC% restart backend >nul 2>&1
+echo [OK] Migrasi selesai.
+exit /b 0
+
+:runsql
+if exist "database\%~1" (
+  %DC% exec -T postgres psql -U !DB_USER! -d !DB_NAME! < "database\%~1" >nul 2>&1
+  echo    migrasi: %~1
+)
+exit /b 0
+
 REM ====================================================================
 :up
 call :ensure_env
@@ -96,6 +145,7 @@ call :ensure_passwd
 echo [..] Build ^& start stack (mode lokal, buka port internal ke 127.0.0.1)...
 %DC% %CFDEV% up -d --build
 if errorlevel 1 goto :end
+call :domigrate
 call :get_webport
 echo.
 echo ============================================================
@@ -125,6 +175,7 @@ echo.
 call :ensure_passwd
 %DC% %CFBASE% up -d --build
 if errorlevel 1 goto :end
+call :domigrate
 call :get_webport
 echo.
 echo ============================================================
@@ -142,6 +193,7 @@ echo   Mode DEMO (data contoh + Quick-Login aktif)
 echo ============================================================
 %DC% %CFDEV% up -d --build
 if errorlevel 1 goto :end
+call :domigrate
 call :get_webport
 echo.
 echo ============================================================

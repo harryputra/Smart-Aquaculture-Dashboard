@@ -224,6 +224,10 @@ apply_migrations() {
       warn "migrasi $(basename "$m") ada peringatan (mungkin sebagian sudah ada)."
     fi
   done
+  # Backend menjalankan seed admin (.env) & demo saat boot — bila tabel belum
+  # ada saat itu, seed gagal. Restart agar seed jalan setelah tabel dibuat.
+  log "Restart backend (seed admin/demo setelah tabel ada)..."
+  dc restart backend >/dev/null 2>&1 || true
 }
 
 # ---------- ringkasan ----------
