@@ -5,8 +5,15 @@
 # JANGAN dipakai di server (bisa bentrok port di VM yang dipakai banyak app,
 # dan tidak perlu karena akses lewat proxy frontend).
 #
-# Dipakai otomatis oleh `./run.sh up` (dev). `./run.sh deploy` TIDAK memakainya.
+# Dipakai otomatis oleh `./run.sh up` (dev) & `demo`. `deploy` TIDAK memakainya.
 # Manual:  docker compose -f docker-compose.yml -f docker-compose.debug.yml up -d
+#
+# CATATAN WINDOWS: host port di-set AUTO ("127.0.0.1::<port>") supaya Docker
+# memilih port host yang BEBAS. Ini menghindari error
+#   "bind: An attempt was made to access a socket in a way forbidden..."
+# yang terjadi bila port (mis. 5432) masuk rentang yang direservasi Windows
+# (WinNAT/Hyper-V). Lihat port host yang dipakai dengan:  docker ps
+# (kolom PORTS, mis. 127.0.0.1:5xxxx->5432/tcp).
 # ======================================================================
 
 services:
@@ -14,16 +21,16 @@ services:
   # (untuk Cloudflare Tunnel), jadi tidak diulang di sini.
   influxdb:
     ports:
-      - "127.0.0.1:${INFLUX_PORT:-8086}:8086"
+      - "127.0.0.1::8086"
 
   postgres:
     ports:
-      - "127.0.0.1:${DB_PORT:-5432}:5432"
+      - "127.0.0.1::5432"
 
   grafana:
     ports:
-      - "127.0.0.1:${GRAFANA_PORT:-3001}:3000"
+      - "127.0.0.1::3000"
 
   backend:
     ports:
-      - "127.0.0.1:${BACKEND_PORT:-5000}:5000"
+      - "127.0.0.1::5000"
