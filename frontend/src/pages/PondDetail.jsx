@@ -16,6 +16,7 @@ import CycleTab from '../components/CycleTab';
 import BiomassTab from '../components/BiomassTab';
 import FinancialTab from '../components/FinancialTab';
 import LogbookTab from '../components/LogbookTab';
+import PondOverview from '../components/PondOverview';
 
 export default function PondDetail() {
   const { pondId } = useParams();
@@ -89,6 +90,8 @@ export default function PondDetail() {
           </div>
         </div>
       )}
+
+      <PondOverview pondId={pondId} onGoTab={setTab} />
 
       {GROUPS.map(g => (
         <div key={g.group} style={{ marginBottom: 10 }}>

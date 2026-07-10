@@ -95,6 +95,56 @@ function registerCycleHandlers({ app, pool }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // ---- Ringkasan menyeluruh 1 kolam (untuk panel atas Detail Kolam) ----
+  app.get('/api/ponds/:pondId/overview', async (req, res) => {
+    const pondId = req.params.pondId;
+    try {
+      // 1) Sensor terbaru + ambang
+      const sensor = (await pool.query(
+        `SELECT temperature, depth, dissolved_oxygen, turbidity, ph, aerator_on, feed_level_cm, timestamp
+         FROM sensor_data WHERE pond_id=$1 ORDER BY timestamp DESC LIMIT 1`, [pondId])).rows[0] || null;
+      const threshold = (await pool.query(`SELECT * FROM sensor_thresholds WHERE pond_id=$1`, [pondId])).rows[0] || null;
+
+      // 2) Siklus aktif + metrik + keuangan ringkas
+      const cycle = (await pool.query(
+        `SELECT * FROM pond_cycles WHERE pond_id=$1 AND status='active' ORDER BY start_date DESC LIMIT 1`, [pondId])).rows[0] || null;
+      let cyc = null, financial = null;
+      if (cycle) {
+        const m = await cycleMetrics(cycle);
+        cyc = { ...m, target_weight_g: cycle.target_weight_g != null ? parseFloat(cycle.target_weight_g) : null, initial_stock: cycle.initial_stock };
+        await ensureFeedStock(pondId);
+        const fs = (await pool.query(`SELECT price_per_kg FROM feed_stock WHERE pond_id=$1`, [pondId])).rows[0];
+        const feedPrice = parseFloat(fs?.price_per_kg) || 0;
+        const feed_cost = m.total_feed_kg * feedPrice;
+        const op = parseFloat((await pool.query(`SELECT COALESCE(SUM(amount),0) s FROM operational_costs WHERE cycle_id=$1`, [cycle.cycle_id])).rows[0].s) || 0;
+        const fry_cost = parseFloat(cycle.fry_cost_total) || 0;
+        financial = { fry_cost: r2(fry_cost), feed_cost: r2(feed_cost), op_cost: r2(op), total_cost: r2(fry_cost + feed_cost + op) };
+      }
+
+      // 3) Pakan hari ini (device tertaut kolam)
+      const dev = (await pool.query(
+        `SELECT device_id, feeding_per_day, next_schedule_hhmm FROM lele_devices WHERE pond_id=$1 LIMIT 1`, [pondId])).rows[0] || null;
+      const feeding = { has_device: !!dev, scheduled_per_day: null, today_total: 0, today_success: 0, today_fail: 0, next_hhmm: null, sessions: [] };
+      if (dev) {
+        feeding.next_hhmm = dev.next_schedule_hhmm || null;
+        const sc = (await pool.query(`SELECT COUNT(*)::int c FROM lele_device_schedules WHERE device_id=$1 AND enabled=TRUE`, [dev.device_id])).rows[0];
+        feeding.scheduled_per_day = sc.c || dev.feeding_per_day || null;
+        const todays = (await pool.query(
+          `SELECT session_name, success, actual_total_g, target_total_g, started_at, completed_at
+           FROM lele_feed_sessions WHERE pond_id=$1 AND started_at::date = CURRENT_DATE ORDER BY started_at ASC`, [pondId])).rows;
+        feeding.sessions = todays.map(s => ({
+          name: s.session_name, success: s.success, actual_g: s.actual_total_g != null ? parseFloat(s.actual_total_g) : null,
+          target_g: s.target_total_g != null ? parseFloat(s.target_total_g) : null, time: s.started_at, done: !!s.completed_at,
+        }));
+        feeding.today_total = todays.length;
+        feeding.today_success = todays.filter(s => s.success === true).length;
+        feeding.today_fail = todays.filter(s => s.success === false).length;
+      }
+
+      res.json({ sensor, threshold, cycle: cyc, feeding, financial });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   // ---- Mulai siklus baru ----
   app.post('/api/ponds/:pondId/cycle', async (req, res) => {
     const pondId = req.params.pondId;
