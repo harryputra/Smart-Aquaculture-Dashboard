@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { NotebookText, Plus, Trash2, Download, Archive, ArchiveRestore } from 'lucide-react';
+import { ClipboardList, Plus, Trash2, Download, Archive, ArchiveRestore } from 'lucide-react';
 import {
   getLogbook, addLogbook, deleteLogbook, exportUrl, archivePond, getPond,
 } from '../services/api';
@@ -56,7 +56,7 @@ export default function LogbookTab({ pondId }) {
       {/* CATATAN / LOGBOOK */}
       <div className="card mb-6">
         <div className="card-header">
-          <div><div className="card-title"><NotebookText size={18} style={{ verticalAlign: -3 }} /> Logbook / Catatan</div>
+          <div><div className="card-title"><ClipboardList size={18} style={{ verticalAlign: -3 }} /> Logbook / Catatan</div>
             <div className="card-subtitle">Observasi, insiden, tindakan — tertaut ke siklus aktif</div></div>
         </div>
         <form onSubmit={submit} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 12 }}>

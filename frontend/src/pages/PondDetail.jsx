@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   ArrowLeft, Wifi, WifiOff, Activity, Power, Utensils, Skull,
-  Calendar, FileText, Settings, AlertCircle, Sprout, Scale, Wallet, NotebookText,
+  Calendar, FileText, Settings, AlertCircle, Sprout, Scale, Wallet, ClipboardList,
 } from 'lucide-react';
 import { getPond, getSensorHistory } from '../services/api';
 import MonitorTab from '../components/MonitorTab';
@@ -48,7 +48,7 @@ export default function PondDetail() {
       { id: 'biomass', label: 'Biomassa', icon: Scale },
       { id: 'mortality', label: 'Kematian', icon: Skull },
       { id: 'financial', label: 'Keuangan', icon: Wallet },
-      { id: 'logbook', label: 'Logbook', icon: NotebookText },
+      { id: 'logbook', label: 'Logbook', icon: ClipboardList },
     ] },
     { group: 'Operasional', tabs: [
       { id: 'monitor', label: 'Monitor', icon: Activity },
