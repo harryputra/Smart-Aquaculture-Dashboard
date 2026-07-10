@@ -1,0 +1,6 @@
+  Smart Aquaculture (mode DEMO) berjalan. Frontend: http://localhost:3000
+  Akun demo (Quick-Login muncul di halaman login):
+    Super Admin : superdemo@demo.test  / Demo12345
+    Pemilik     : andri@demo.test      / Demo12345
+    Pekerja     : pekerja@demo.test    / Demo12345
+    Pengamat    : pengamat@demo.test   / Demo12345
