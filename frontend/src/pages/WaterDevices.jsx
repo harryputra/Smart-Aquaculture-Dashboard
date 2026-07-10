@@ -131,6 +131,21 @@ export default function WaterDevices() {
                   })}
                 </div>
 
+                {/* Ketinggian pakan (dari ultrasonik hopper) */}
+                {latest.feed_level_cm != null && (() => {
+                  const low = thr?.feed_level_low_cm != null && Number(latest.feed_level_cm) < Number(thr.feed_level_low_cm);
+                  return (
+                    <div style={{
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      padding: '6px 10px', borderRadius: 8, marginBottom: 12, fontSize: 13,
+                      background: low ? '#fee2e2' : 'var(--bg-tertiary)', color: low ? '#b91c1c' : 'var(--text-primary)',
+                    }}>
+                      <span>🍚 Ketinggian pakan</span>
+                      <strong>{Number(latest.feed_level_cm).toFixed(1)} cm{low ? ' — menipis!' : ''}</strong>
+                    </div>
+                  );
+                })()}
+
                 {/* Kontrol valve */}
                 {canWrite ? (
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>

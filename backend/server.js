@@ -168,9 +168,9 @@ mqttClient.on('message', async (topic, message) => {
 async function saveSensorData(farm_id, pond_id, data, source = 'esp32') {
   try {
     await pool.query(
-      `INSERT INTO sensor_data (farm_id, pond_id, temperature, depth, dissolved_oxygen, turbidity, ph, source, aerator_on)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-      [farm_id, pond_id, data.temperature, data.depth, data.dissolved_oxygen, data.turbidity, data.ph, source, data.aerator === true]
+      `INSERT INTO sensor_data (farm_id, pond_id, temperature, depth, dissolved_oxygen, turbidity, ph, source, aerator_on, feed_level_cm)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [farm_id, pond_id, data.temperature, data.depth, data.dissolved_oxygen, data.turbidity, data.ph, source, data.aerator === true, data.feed_level_cm ?? null]
     );
 
     const point = new Point('aquaculture_sensors')
@@ -290,6 +290,20 @@ async function checkSensorRisks(pond_id, data) {
          VALUES ($1, $2, 'sensor', $3, $4, $5, $6, $7)`,
         [pond_id, risk.severity, risk.title, risk.message, risk.field, risk.value, actionTaken]
       );
+    }
+
+    // Peringatan PAKAN MENIPIS (dari ultrasonik hopper) — dedup 6 jam.
+    if (data.feed_level_cm != null && t.feed_level_low_cm != null &&
+        parseFloat(data.feed_level_cm) < parseFloat(t.feed_level_low_cm)) {
+      const recent = await pool.query(
+        `SELECT id FROM notifications WHERE pond_id=$1 AND sensor_field='feed_level'
+           AND created_at > NOW() - INTERVAL '6 hours' LIMIT 1`, [pond_id]);
+      if (!recent.rows.length) {
+        await pool.query(
+          `INSERT INTO notifications (pond_id, type, category, title, message, sensor_field, sensor_value)
+           VALUES ($1,'risk','feed_stock','Pakan Menipis',$2,'feed_level',$3)`,
+          [pond_id, `Ketinggian pakan di wadah tinggal ${data.feed_level_cm} cm (di bawah ${t.feed_level_low_cm} cm). Segera isi ulang.`, data.feed_level_cm]);
+      }
     }
   } catch (e) {
     console.error('Risk check error:', e.message);
@@ -696,7 +710,7 @@ app.get('/api/water-devices', async (req, res) => {
       SELECT p.pond_id, p.name, p.fish_type, p.device_mode, p.farm_id, fa.name AS farm_name,
              ds.device_id, ds.is_connected, ds.last_seen, ds.ip_address, ds.rssi,
              (SELECT row_to_json(s) FROM (
-                SELECT temperature, depth, dissolved_oxygen, turbidity, ph, timestamp
+                SELECT temperature, depth, dissolved_oxygen, turbidity, ph, feed_level_cm, timestamp
                 FROM sensor_data WHERE pond_id = p.pond_id ORDER BY timestamp DESC LIMIT 1
              ) s) AS latest,
              (SELECT row_to_json(t) FROM sensor_thresholds t WHERE t.pond_id = p.pond_id) AS threshold
