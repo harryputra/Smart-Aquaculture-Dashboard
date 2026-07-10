@@ -676,6 +676,35 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // Detail feeder + gramasi + riwayat sesi untuk SATU kolam (tab Pakan).
+  app.get('/api/ponds/:pondId/feeder', async (req, res) => {
+    try {
+      const dev = (await pool.query(`SELECT * FROM lele_devices WHERE pond_id=$1 LIMIT 1`, [req.params.pondId])).rows[0];
+      if (!dev) return res.json({ has_device: false });
+      const live = liveDataCache[dev.device_id] || {};
+      const fishCount = dev.fish_count || live.fish_count || 0;
+      const avgG = parseFloat(dev.avg_fish_g ?? live.avg_fish_g) || 0;
+      const rate = parseFloat(dev.feeding_rate_percent ?? live.feeding_rate_percent) || 0;
+      const perDay = dev.feeding_per_day || live.feeding_per_day || 0;
+      const dailyFeedG = (fishCount * avgG * rate) / 100;              // gram/hari
+      const perScheduleG = perDay > 0 ? dailyFeedG / perDay : 0;
+      const settings = {
+        device_id: dev.device_id, name: dev.name, is_online: dev.is_online,
+        feed_mode: live.feed_mode || (dev.auto_feed_enabled ? 'jadwal' : 'manual'),
+        feeding_rate_percent: rate, feeding_per_day: perDay,
+        avg_fish_g: avgG, fish_count: fishCount,
+        next_schedule_hhmm: dev.next_schedule_hhmm || live.next_schedule_hhmm || null,
+        daily_feed_g: Math.round(dailyFeedG), per_schedule_g: Math.round(perScheduleG),
+        last_feed_time: dev.last_feed_time, sample_ready: dev.sample_ready,
+      };
+      const sessions = (await pool.query(
+        `SELECT session_name, target_total_g, actual_total_g, planned_batch_count, actual_batch_count,
+                success, started_at, completed_at
+         FROM lele_feed_sessions WHERE pond_id=$1 ORDER BY started_at DESC LIMIT 40`, [req.params.pondId])).rows;
+      res.json({ has_device: true, settings, sessions });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   app.get('/api/lele/devices/:deviceId/growth', async (req, res) => {
     try {
       const r = await pool.query(

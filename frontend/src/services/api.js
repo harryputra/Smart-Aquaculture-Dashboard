@@ -80,6 +80,7 @@ export const getAerator = (pondId) => req(`/aerator/${pondId}`);
 export const setAerator = (pondId, data) => req(`/aerator/${pondId}`, { method: 'PUT', body: data });
 export const getCycleCompare = () => req('/cycles/compare');
 export const getPondOverview = (pondId) => req(`/ponds/${pondId}/overview`);
+export const getPondFeeder = (pondId) => req(`/ponds/${pondId}/feeder`);
 export const sendSimulation = (pondId, data) =>
   req(`/control/${pondId}/simulate`, { method: 'POST', body: data });
 

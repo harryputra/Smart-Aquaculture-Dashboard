@@ -4,6 +4,7 @@ import {
   getFeedingSchedules, createFeedingSchedule, deleteFeedingSchedule,
   getFeedingLogs, recordFeeding,
 } from '../services/api';
+import FeederDetail from './FeederDetail';
 
 const DAYS = [
   { id: 1, label: 'S', name: 'Sen' }, { id: 2, label: 'S', name: 'Sel' },
@@ -71,6 +72,8 @@ export default function FeedingTab({ pondId }) {
 
   return (
     <>
+      <FeederDetail pondId={pondId} />
+
       <div className="card mb-6">
         <div className="card-header">
           <div>
