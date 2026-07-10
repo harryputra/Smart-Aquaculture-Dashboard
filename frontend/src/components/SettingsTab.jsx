@@ -88,7 +88,11 @@ export default function SettingsTab({ pondId, threshold, onSaved }) {
           <input type="number" step="0.1" className="form-input" value={t.ph_max || ''}
             onChange={e => setT({ ...t, ph_max: e.target.value })} />
         </div>
-        <div></div>
+        <div className="form-group">
+          <label className="form-label">Pakan menipis di bawah (cm)</label>
+          <input type="number" step="0.5" className="form-input" value={t.feed_level_low_cm ?? ''}
+            onChange={e => setT({ ...t, feed_level_low_cm: e.target.value })} />
+        </div>
       </div>
 
       <h4 style={{ marginTop: 24, marginBottom: 12, fontSize: 13, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700 }}>

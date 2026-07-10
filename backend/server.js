@@ -760,13 +760,14 @@ app.get('/api/thresholds/:pondId', async (req, res) => {
 
 app.put('/api/thresholds/:pondId', async (req, res) => {
   try {
-    const { temp_min, temp_max, depth_min, depth_max, do_min, do_max, turbidity_max, ph_min, ph_max, auto_drain_enabled, auto_refill_enabled } = req.body;
+    const { temp_min, temp_max, depth_min, depth_max, do_min, do_max, turbidity_max, ph_min, ph_max, auto_drain_enabled, auto_refill_enabled, feed_level_low_cm } = req.body;
     const r = await pool.query(
-      `UPDATE sensor_thresholds SET 
-        temp_min=$1, temp_max=$2, depth_min=$3, depth_max=$4, do_min=$5, do_max=$6, 
-        turbidity_max=$7, ph_min=$8, ph_max=$9, auto_drain_enabled=$10, auto_refill_enabled=$11, updated_at=NOW()
-       WHERE pond_id=$12 RETURNING *`,
-      [temp_min, temp_max, depth_min, depth_max, do_min, do_max, turbidity_max, ph_min, ph_max, auto_drain_enabled, auto_refill_enabled, req.params.pondId]
+      `UPDATE sensor_thresholds SET
+        temp_min=$1, temp_max=$2, depth_min=$3, depth_max=$4, do_min=$5, do_max=$6,
+        turbidity_max=$7, ph_min=$8, ph_max=$9, auto_drain_enabled=$10, auto_refill_enabled=$11,
+        feed_level_low_cm=COALESCE($12, feed_level_low_cm), updated_at=NOW()
+       WHERE pond_id=$13 RETURNING *`,
+      [temp_min, temp_max, depth_min, depth_max, do_min, do_max, turbidity_max, ph_min, ph_max, auto_drain_enabled, auto_refill_enabled, feed_level_low_cm ?? null, req.params.pondId]
     );
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
