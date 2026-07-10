@@ -205,6 +205,7 @@ MIGRATIONS=(
   database/migration-whatsapp.sql
   database/migration-aerator.sql
   database/migration-feedlevel.sql
+  database/migration-wa-providers.sql
 )
 apply_migrations() {
   load_env

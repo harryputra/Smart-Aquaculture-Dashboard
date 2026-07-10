@@ -19,12 +19,48 @@ function normPhone(raw) {
   return d;
 }
 
+// Apakah config provider aktif sudah lengkap untuk mengirim?
+function cfgReady(cfg) {
+  if (!cfg || !cfg.enabled) return false;
+  if (cfg.provider === 'fonnte') return !!cfg.fonnte_token;
+  if (cfg.provider === 'wablas') return !!(cfg.wablas_token && cfg.wablas_domain);
+  return !!(cfg.phone_number_id && cfg.access_token);   // cloud_api (default)
+}
+
 async function sendWhatsApp(cfg, phone, text) {
   const to = normPhone(phone);
   if (!to) throw new Error('Nomor tidak valid');
+  const msg = String(text).slice(0, 1000);
+  const provider = cfg.provider || 'cloud_api';
+
+  // --- Gateway Fonnte (Indonesia) — teks bebas ---
+  if (provider === 'fonnte') {
+    const r = await fetch('https://api.fonnte.com/send', {
+      method: 'POST',
+      headers: { Authorization: cfg.fonnte_token || '', 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ target: to, message: msg }).toString(),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j.status === false) throw new Error(`Fonnte ${r.status}: ${JSON.stringify(j).slice(0, 200)}`);
+    return j;
+  }
+
+  // --- Gateway Wablas (Indonesia) — teks bebas ---
+  if (provider === 'wablas') {
+    const base = String(cfg.wablas_domain || '').replace(/\/+$/, '');
+    const r = await fetch(`${base}/api/send-message`, {
+      method: 'POST',
+      headers: { Authorization: cfg.wablas_token || '', 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ phone: to, message: msg }).toString(),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j.status === false) throw new Error(`Wablas ${r.status}: ${JSON.stringify(j).slice(0, 200)}`);
+    return j;
+  }
+
+  // --- WhatsApp Cloud API (Meta resmi) — pakai message template ---
   const ver = cfg.api_version || 'v21.0';
   const url = `https://graph.facebook.com/${ver}/${cfg.phone_number_id}/messages`;
-  const msg = String(text).slice(0, 1000);
   const body = cfg.template_name
     ? {
         messaging_product: 'whatsapp', to, type: 'template',
@@ -35,7 +71,6 @@ async function sendWhatsApp(cfg, phone, text) {
         },
       }
     : { messaging_product: 'whatsapp', to, type: 'text', text: { body: msg } };
-
   const r = await fetch(url, {
     method: 'POST',
     headers: { Authorization: `Bearer ${cfg.access_token}`, 'Content-Type': 'application/json' },
@@ -43,7 +78,7 @@ async function sendWhatsApp(cfg, phone, text) {
   });
   if (!r.ok) {
     const e = await r.text().catch(() => '');
-    throw new Error(`WA ${r.status}: ${e.slice(0, 220)}`);
+    throw new Error(`WA Cloud ${r.status}: ${e.slice(0, 200)}`);
   }
   return r.json().catch(() => ({}));
 }
@@ -70,9 +105,12 @@ function registerWaHandlers({ app, pool }) {
     if (!isSuper(req)) return res.status(403).json({ error: 'Hanya Super Admin.' });
     const c = await getCfg();
     res.json({
-      enabled: c.enabled, provider: c.provider, phone_number_id: c.phone_number_id,
-      api_version: c.api_version, template_name: c.template_name, template_lang: c.template_lang,
-      has_token: !!c.access_token,   // token tak dikirim balik
+      enabled: c.enabled, provider: c.provider || 'cloud_api',
+      // Cloud API
+      phone_number_id: c.phone_number_id, api_version: c.api_version,
+      template_name: c.template_name, template_lang: c.template_lang, has_token: !!c.access_token,
+      // Gateway
+      wablas_domain: c.wablas_domain, has_fonnte_token: !!c.fonnte_token, has_wablas_token: !!c.wablas_token,
     });
   });
   app.put('/api/wa/config', async (req, res) => {
@@ -80,12 +118,16 @@ function registerWaHandlers({ app, pool }) {
     try {
       const b = req.body || {};
       const cur = await getCfg();
-      const token = (b.access_token && b.access_token !== '') ? b.access_token : cur.access_token; // kosong = jangan ubah
+      const provider = ['cloud_api', 'fonnte', 'wablas'].includes(b.provider) ? b.provider : (cur.provider || 'cloud_api');
+      // Token kosong = jangan ubah (biar tak terhapus).
+      const keep = (v, old) => (v && v !== '' ? v : old);
       await pool.query(
-        `UPDATE wa_config SET enabled=$1, phone_number_id=$2, access_token=$3, api_version=$4,
-           template_name=$5, template_lang=$6, updated_at=NOW() WHERE id=1`,
-        [!!b.enabled, b.phone_number_id || null, token || null, b.api_version || 'v21.0',
-         b.template_name || null, b.template_lang || 'id']);
+        `UPDATE wa_config SET enabled=$1, provider=$2, phone_number_id=$3, access_token=$4, api_version=$5,
+           template_name=$6, template_lang=$7, fonnte_token=$8, wablas_token=$9, wablas_domain=$10, updated_at=NOW()
+         WHERE id=1`,
+        [!!b.enabled, provider, b.phone_number_id || null, keep(b.access_token, cur.access_token),
+         b.api_version || 'v21.0', b.template_name || null, b.template_lang || 'id',
+         keep(b.fonnte_token, cur.fonnte_token), keep(b.wablas_token, cur.wablas_token), b.wablas_domain || null]);
       res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
@@ -163,7 +205,7 @@ function registerWaHandlers({ app, pool }) {
   app.post('/api/wa/recipients/:id/test', requireOwner, async (req, res) => {
     try {
       const cfg = await getCfg();
-      if (!cfg.enabled || !cfg.phone_number_id || !cfg.access_token)
+      if (!cfgReady(cfg))
         return res.status(400).json({ error: 'Gateway WhatsApp belum aktif/lengkap (atur di config Superadmin).' });
       const rcp = (await pool.query(`SELECT * FROM wa_recipients WHERE id=$1`, [req.params.id])).rows[0];
       if (!rcp) return res.status(404).json({ error: 'Tidak ditemukan.' });
@@ -204,7 +246,7 @@ function registerWaHandlers({ app, pool }) {
     const ids = rows.map(r => r.id);
     await pool.query(`UPDATE notifications SET wa_dispatched = TRUE WHERE id = ANY($1)`, [ids]); // tandai dulu → anti dobel
 
-    if (!cfg.enabled || !cfg.phone_number_id || !cfg.access_token) return;
+    if (!cfgReady(cfg)) return;
 
     for (const n of rows) {
       // lewati notifikasi lama (mis. saat baru mengaktifkan fitur) atau tanpa org

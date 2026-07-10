@@ -200,34 +200,78 @@ function GatewayConfig() {
 
   async function save() {
     setBusy(true);
-    try { await setWaConfig(cfg); alert('Konfigurasi gateway disimpan.'); setCfg({ ...cfg, access_token: '' }); }
+    try { await setWaConfig(cfg); alert('Konfigurasi gateway disimpan.'); setCfg({ ...cfg, access_token: '', fonnte_token: '', wablas_token: '' }); }
     catch (e) { alert('Gagal: ' + e.message); } finally { setBusy(false); }
   }
 
+  const provider = cfg.provider || 'cloud_api';
+  const set = (k, v) => setCfg({ ...cfg, [k]: v });
+
   return (
     <div className="card mb-6">
-      <div className="card-header"><div className="card-title"><Settings size={18} /> Gateway WhatsApp Cloud API (global)</div></div>
-      <div className="alert alert-info" style={{ marginBottom: 12, fontSize: 12.5 }}>
-        Notif proaktif Cloud API WAJIB pakai <strong>message template</strong> yang sudah disetujui Meta, dengan <strong>1 variabel <code>{'{{1}}'}</code></strong> di body (seluruh isi pesan masuk ke variabel itu). Isi nama template di bawah.
-      </div>
-      <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
-        <input type="checkbox" checked={!!cfg.enabled} onChange={e => setCfg({ ...cfg, enabled: e.target.checked })} /> Aktifkan pengiriman WhatsApp
-      </label>
+      <div className="card-header"><div className="card-title"><Settings size={18} /> Gateway WhatsApp (global)</div></div>
+
       <div className="form-row">
-        <div className="form-group"><label className="form-label">Phone Number ID</label>
-          <input className="form-input" value={cfg.phone_number_id || ''} onChange={e => setCfg({ ...cfg, phone_number_id: e.target.value })} placeholder="dari Meta WhatsApp Manager" /></div>
-        <div className="form-group"><label className="form-label">Access Token {cfg.has_token && <span className="text-xs text-muted">(tersimpan — isi untuk ganti)</span>}</label>
-          <input className="form-input" type="password" value={cfg.access_token || ''} onChange={e => setCfg({ ...cfg, access_token: e.target.value })} placeholder={cfg.has_token ? '••••••••' : 'token Meta'} /></div>
+        <div className="form-group"><label className="form-label">Provider aktif</label>
+          <select className="form-select" value={provider} onChange={e => set('provider', e.target.value)}>
+            <option value="cloud_api">WhatsApp Cloud API (Meta resmi)</option>
+            <option value="fonnte">Fonnte (gateway Indonesia)</option>
+            <option value="wablas">Wablas (gateway Indonesia)</option>
+          </select></div>
+        <div className="form-group" style={{ display: 'flex', alignItems: 'flex-end' }}>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input type="checkbox" checked={!!cfg.enabled} onChange={e => set('enabled', e.target.checked)} /> Aktifkan pengiriman WhatsApp
+          </label></div>
       </div>
-      <div className="form-row">
-        <div className="form-group"><label className="form-label">Nama Template</label>
-          <input className="form-input" value={cfg.template_name || ''} onChange={e => setCfg({ ...cfg, template_name: e.target.value })} placeholder="mis. aquasmart_alert" /></div>
-        <div className="form-group"><label className="form-label">Bahasa Template</label>
-          <input className="form-input" value={cfg.template_lang || 'id'} onChange={e => setCfg({ ...cfg, template_lang: e.target.value })} placeholder="id / en" /></div>
-      </div>
-      <div className="form-group" style={{ maxWidth: 200 }}><label className="form-label">API Version</label>
-        <input className="form-input" value={cfg.api_version || 'v21.0'} onChange={e => setCfg({ ...cfg, api_version: e.target.value })} /></div>
-      <button className="btn btn-primary btn-sm" disabled={busy} onClick={save}>Simpan Gateway</button>
+
+      {/* Isi field sesuai provider; yang tak dipilih tetap tersimpan di server */}
+      {provider === 'cloud_api' && (
+        <>
+          <div className="alert alert-info" style={{ margin: '4px 0 12px', fontSize: 12.5 }}>
+            Cloud API WAJIB pakai <strong>message template</strong> disetujui Meta, body 1 variabel <code>{'{{1}}'}</code>.
+          </div>
+          <div className="form-row">
+            <div className="form-group"><label className="form-label">Phone Number ID</label>
+              <input className="form-input" value={cfg.phone_number_id || ''} onChange={e => set('phone_number_id', e.target.value)} placeholder="dari Meta WhatsApp Manager" /></div>
+            <div className="form-group"><label className="form-label">Access Token {cfg.has_token && <span className="text-xs text-muted">(tersimpan — isi utk ganti)</span>}</label>
+              <input className="form-input" type="password" value={cfg.access_token || ''} onChange={e => set('access_token', e.target.value)} placeholder={cfg.has_token ? '••••••••' : 'token Meta'} /></div>
+          </div>
+          <div className="form-row">
+            <div className="form-group"><label className="form-label">Nama Template</label>
+              <input className="form-input" value={cfg.template_name || ''} onChange={e => set('template_name', e.target.value)} placeholder="mis. aquasmart_alert" /></div>
+            <div className="form-group"><label className="form-label">Bahasa Template</label>
+              <input className="form-input" value={cfg.template_lang || 'id'} onChange={e => set('template_lang', e.target.value)} placeholder="id / en" /></div>
+          </div>
+          <div className="form-group" style={{ maxWidth: 200 }}><label className="form-label">API Version</label>
+            <input className="form-input" value={cfg.api_version || 'v21.0'} onChange={e => set('api_version', e.target.value)} /></div>
+        </>
+      )}
+
+      {provider === 'fonnte' && (
+        <>
+          <div className="alert alert-info" style={{ margin: '4px 0 12px', fontSize: 12.5 }}>
+            Fonnte: daftar di fonnte.com, hubungkan perangkat WA, salin <strong>Token</strong>. Kirim teks bebas (tanpa template).
+          </div>
+          <div className="form-group" style={{ maxWidth: 420 }}><label className="form-label">Fonnte Token {cfg.has_fonnte_token && <span className="text-xs text-muted">(tersimpan — isi utk ganti)</span>}</label>
+            <input className="form-input" type="password" value={cfg.fonnte_token || ''} onChange={e => set('fonnte_token', e.target.value)} placeholder={cfg.has_fonnte_token ? '••••••••' : 'token dari dashboard Fonnte'} /></div>
+        </>
+      )}
+
+      {provider === 'wablas' && (
+        <>
+          <div className="alert alert-info" style={{ margin: '4px 0 12px', fontSize: 12.5 }}>
+            Wablas: daftar di wablas.com, salin <strong>domain server</strong> (mis. https://jogja.wablas.com) & <strong>Token</strong>. Kirim teks bebas.
+          </div>
+          <div className="form-row">
+            <div className="form-group"><label className="form-label">Domain Server</label>
+              <input className="form-input" value={cfg.wablas_domain || ''} onChange={e => set('wablas_domain', e.target.value)} placeholder="https://xxx.wablas.com" /></div>
+            <div className="form-group"><label className="form-label">Wablas Token {cfg.has_wablas_token && <span className="text-xs text-muted">(tersimpan — isi utk ganti)</span>}</label>
+              <input className="form-input" type="password" value={cfg.wablas_token || ''} onChange={e => set('wablas_token', e.target.value)} placeholder={cfg.has_wablas_token ? '••••••••' : 'token dari dashboard Wablas'} /></div>
+          </div>
+        </>
+      )}
+
+      <button className="btn btn-primary btn-sm" disabled={busy} onClick={save} style={{ marginTop: 4 }}>Simpan Gateway</button>
     </div>
   );
 }

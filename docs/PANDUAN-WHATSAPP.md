@@ -17,11 +17,14 @@ Ada 2 pilihan. Sistem saat ini memakai **WhatsApp Cloud API (resmi Meta)**.
 
 ¹ Notifikasi kategori *utility* punya kuota gratis; tak ada biaya langganan bulanan untuk volume rendah. Yang "mahal" hanya **usaha setup**, bukan uang.
 
+**Ketiganya SUDAH didukung sistem.** Di **Notifikasi WA → Gateway → Provider aktif**,
+pilih salah satu (Cloud API / Fonnte / Wablas), isi kredensialnya, centang
+**Aktifkan** → **Simpan**. Yang **aktif** itulah yang dipakai. Anda boleh menyimpan
+kredensial beberapa provider sekaligus dan tinggal berganti kapan saja.
+
 **Rekomendasi:**
-- Ingin **resmi & gratis**, tak masalah setup agak ribet → **Cloud API** (lanjut §2).
-- Ingin **paling cepat & praktis** (bayar sedikit) → **Gateway**. Sistem belum
-  mendukung gateway; **bilang saja, saya tambahkan** (perubahan kecil), lalu Anda
-  cukup isi *token* dari Fonnte/Wablas.
+- Ingin **resmi & gratis**, tak masalah setup agak ribet → **Cloud API** (lihat §2).
+- Ingin **paling cepat & praktis** (bayar sedikit) → **Fonnte/Wablas** (lihat §2G).
 
 ---
 
@@ -60,6 +63,26 @@ Login **Super Admin** → menu **Notifikasi WA** → kartu **Gateway WhatsApp Cl
 - **Access Token** (dari 2b)
 - **Nama Template** (dari 2c, mis. `aquasmart_alert`) + **Bahasa** `id`
 - **Simpan Gateway**.
+
+---
+
+## 2G. Setup Gateway (Fonnte / Wablas) — paling praktis
+Tak perlu template. Login **Super Admin** → **Notifikasi WA → Gateway** →
+**Provider aktif** = Fonnte atau Wablas.
+
+**Fonnte:**
+1. Daftar di **fonnte.com** → tambah **device** → hubungkan nomor WA (scan QR).
+2. Salin **Token** di dashboard Fonnte.
+3. Di dashboard AquaSmart: pilih provider **Fonnte**, tempel **Token**, **Aktifkan**, **Simpan**.
+
+**Wablas:**
+1. Daftar di **wablas.com** → hubungkan nomor WA.
+2. Catat **domain server** (mis. `https://jogja.wablas.com`) & **Token**.
+3. Di dashboard AquaSmart: pilih provider **Wablas**, isi **Domain** + **Token**, **Aktifkan**, **Simpan**.
+
+> Anda bisa mengisi kredensial Cloud API, Fonnte, dan Wablas **sekaligus** —
+> yang dipakai hanyalah **Provider aktif** yang dipilih. Ganti kapan saja tanpa
+> mengisi ulang.
 
 ---
 
