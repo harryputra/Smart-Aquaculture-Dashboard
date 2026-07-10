@@ -80,9 +80,17 @@ Tak perlu template. Login **Super Admin** → **Notifikasi WA → Gateway** →
 2. Catat **domain server** (mis. `https://jogja.wablas.com`) & **Token**.
 3. Di dashboard AquaSmart: pilih provider **Wablas**, isi **Domain** + **Token**, **Aktifkan**, **Simpan**.
 
-> Anda bisa mengisi kredensial Cloud API, Fonnte, dan Wablas **sekaligus** —
-> yang dipakai hanyalah **Provider aktif** yang dipilih. Ganti kapan saja tanpa
-> mengisi ulang.
+**Watzap:** daftar di **watzap.id** → salin **API Key** & **Number Key** → pilih
+provider **Watzap**, isi keduanya, **Aktifkan**, **Simpan**.
+
+**Generic HTTP (gateway apa pun):** pilih provider **Generic**, isi **URL endpoint**,
+**Header (JSON)**, dan **Body template** memakai `{{phone}}` & `{{message}}`. Contoh
+body: `{"phone":"{{phone}}","message":"{{message}}"}`. Cocok untuk gateway yang
+belum ada di daftar.
+
+> Anda bisa mengisi kredensial semua provider (Cloud API, Fonnte, Wablas, Watzap,
+> Generic) **sekaligus** — yang dipakai hanyalah **Provider aktif** yang dipilih.
+> Ganti kapan saja tanpa mengisi ulang.
 
 ---
 

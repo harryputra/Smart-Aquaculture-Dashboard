@@ -200,7 +200,7 @@ function GatewayConfig() {
 
   async function save() {
     setBusy(true);
-    try { await setWaConfig(cfg); alert('Konfigurasi gateway disimpan.'); setCfg({ ...cfg, access_token: '', fonnte_token: '', wablas_token: '' }); }
+    try { await setWaConfig(cfg); alert('Konfigurasi gateway disimpan.'); setCfg({ ...cfg, access_token: '', fonnte_token: '', wablas_token: '', watzap_api_key: '', watzap_number_key: '' }); }
     catch (e) { alert('Gagal: ' + e.message); } finally { setBusy(false); }
   }
 
@@ -217,6 +217,8 @@ function GatewayConfig() {
             <option value="cloud_api">WhatsApp Cloud API (Meta resmi)</option>
             <option value="fonnte">Fonnte (gateway Indonesia)</option>
             <option value="wablas">Wablas (gateway Indonesia)</option>
+            <option value="watzap">Watzap (gateway Indonesia)</option>
+            <option value="generic">Generic HTTP (gateway lain)</option>
           </select></div>
         <div className="form-group" style={{ display: 'flex', alignItems: 'flex-end' }}>
           <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -268,6 +270,34 @@ function GatewayConfig() {
             <div className="form-group"><label className="form-label">Wablas Token {cfg.has_wablas_token && <span className="text-xs text-muted">(tersimpan — isi utk ganti)</span>}</label>
               <input className="form-input" type="password" value={cfg.wablas_token || ''} onChange={e => set('wablas_token', e.target.value)} placeholder={cfg.has_wablas_token ? '••••••••' : 'token dari dashboard Wablas'} /></div>
           </div>
+        </>
+      )}
+
+      {provider === 'watzap' && (
+        <>
+          <div className="alert alert-info" style={{ margin: '4px 0 12px', fontSize: 12.5 }}>
+            Watzap: daftar di watzap.id, salin <strong>API Key</strong> & <strong>Number Key</strong>. Kirim teks bebas.
+          </div>
+          <div className="form-row">
+            <div className="form-group"><label className="form-label">API Key {cfg.has_watzap_api_key && <span className="text-xs text-muted">(tersimpan — isi utk ganti)</span>}</label>
+              <input className="form-input" type="password" value={cfg.watzap_api_key || ''} onChange={e => set('watzap_api_key', e.target.value)} placeholder={cfg.has_watzap_api_key ? '••••••••' : 'API Key Watzap'} /></div>
+            <div className="form-group"><label className="form-label">Number Key {cfg.has_watzap_number_key && <span className="text-xs text-muted">(tersimpan)</span>}</label>
+              <input className="form-input" type="password" value={cfg.watzap_number_key || ''} onChange={e => set('watzap_number_key', e.target.value)} placeholder={cfg.has_watzap_number_key ? '••••••••' : 'Number Key Watzap'} /></div>
+          </div>
+        </>
+      )}
+
+      {provider === 'generic' && (
+        <>
+          <div className="alert alert-info" style={{ margin: '4px 0 12px', fontSize: 12.5 }}>
+            Generic HTTP: untuk gateway apa pun. Gunakan <code>{'{{phone}}'}</code> & <code>{'{{message}}'}</code> di body. Header dalam format JSON.
+          </div>
+          <div className="form-group"><label className="form-label">URL Endpoint</label>
+            <input className="form-input" value={cfg.generic_url || ''} onChange={e => set('generic_url', e.target.value)} placeholder="https://api.gateway.com/send" /></div>
+          <div className="form-group"><label className="form-label">Header (JSON)</label>
+            <textarea className="form-input" rows={2} value={cfg.generic_headers || ''} onChange={e => set('generic_headers', e.target.value)} placeholder='{"Authorization":"Bearer xxx","Content-Type":"application/json"}' /></div>
+          <div className="form-group"><label className="form-label">Body template</label>
+            <textarea className="form-input" rows={2} value={cfg.generic_body || ''} onChange={e => set('generic_body', e.target.value)} placeholder='{"phone":"{{phone}}","message":"{{message}}"}' /></div>
         </>
       )}
 

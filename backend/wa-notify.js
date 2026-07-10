@@ -24,6 +24,8 @@ function cfgReady(cfg) {
   if (!cfg || !cfg.enabled) return false;
   if (cfg.provider === 'fonnte') return !!cfg.fonnte_token;
   if (cfg.provider === 'wablas') return !!(cfg.wablas_token && cfg.wablas_domain);
+  if (cfg.provider === 'watzap') return !!(cfg.watzap_api_key && cfg.watzap_number_key);
+  if (cfg.provider === 'generic') return !!cfg.generic_url;
   return !!(cfg.phone_number_id && cfg.access_token);   // cloud_api (default)
 }
 
@@ -56,6 +58,32 @@ async function sendWhatsApp(cfg, phone, text) {
     const j = await r.json().catch(() => ({}));
     if (!r.ok || j.status === false) throw new Error(`Wablas ${r.status}: ${JSON.stringify(j).slice(0, 200)}`);
     return j;
+  }
+
+  // --- Gateway Watzap (Indonesia) — teks bebas ---
+  if (provider === 'watzap') {
+    const r = await fetch('https://api.watzap.id/v1/send_message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: cfg.watzap_api_key, number_key: cfg.watzap_number_key, phone_no: to, message: msg }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(`Watzap ${r.status}: ${JSON.stringify(j).slice(0, 200)}`);
+    return j;
+  }
+
+  // --- Generic HTTP — untuk gateway apa pun (URL + header + body template) ---
+  if (provider === 'generic') {
+    if (!cfg.generic_url) throw new Error('URL generic kosong');
+    let headers = { 'Content-Type': 'application/json' };
+    if (cfg.generic_headers) { try { headers = { ...headers, ...JSON.parse(cfg.generic_headers) }; } catch (_) {} }
+    const tpl = cfg.generic_body || '{"phone":"{{phone}}","message":"{{message}}"}';
+    // escape untuk aman di dalam string JSON
+    const safeMsg = msg.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+    const body = tpl.replace(/{{\s*phone\s*}}/g, to).replace(/{{\s*message\s*}}/g, safeMsg);
+    const r = await fetch(cfg.generic_url, { method: 'POST', headers, body });
+    if (!r.ok) { const e = await r.text().catch(() => ''); throw new Error(`Generic ${r.status}: ${e.slice(0, 200)}`); }
+    return r.json().catch(() => ({}));
   }
 
   // --- WhatsApp Cloud API (Meta resmi) — pakai message template ---
@@ -111,6 +139,8 @@ function registerWaHandlers({ app, pool }) {
       template_name: c.template_name, template_lang: c.template_lang, has_token: !!c.access_token,
       // Gateway
       wablas_domain: c.wablas_domain, has_fonnte_token: !!c.fonnte_token, has_wablas_token: !!c.wablas_token,
+      has_watzap_api_key: !!c.watzap_api_key, has_watzap_number_key: !!c.watzap_number_key,
+      generic_url: c.generic_url, generic_headers: c.generic_headers, generic_body: c.generic_body,
     });
   });
   app.put('/api/wa/config', async (req, res) => {
@@ -118,16 +148,20 @@ function registerWaHandlers({ app, pool }) {
     try {
       const b = req.body || {};
       const cur = await getCfg();
-      const provider = ['cloud_api', 'fonnte', 'wablas'].includes(b.provider) ? b.provider : (cur.provider || 'cloud_api');
-      // Token kosong = jangan ubah (biar tak terhapus).
+      const provider = ['cloud_api', 'fonnte', 'wablas', 'watzap', 'generic'].includes(b.provider) ? b.provider : (cur.provider || 'cloud_api');
+      // Token/secret kosong = jangan ubah (biar tak terhapus).
       const keep = (v, old) => (v && v !== '' ? v : old);
       await pool.query(
         `UPDATE wa_config SET enabled=$1, provider=$2, phone_number_id=$3, access_token=$4, api_version=$5,
-           template_name=$6, template_lang=$7, fonnte_token=$8, wablas_token=$9, wablas_domain=$10, updated_at=NOW()
+           template_name=$6, template_lang=$7, fonnte_token=$8, wablas_token=$9, wablas_domain=$10,
+           watzap_api_key=$11, watzap_number_key=$12, generic_url=$13, generic_headers=$14, generic_body=$15,
+           updated_at=NOW()
          WHERE id=1`,
         [!!b.enabled, provider, b.phone_number_id || null, keep(b.access_token, cur.access_token),
          b.api_version || 'v21.0', b.template_name || null, b.template_lang || 'id',
-         keep(b.fonnte_token, cur.fonnte_token), keep(b.wablas_token, cur.wablas_token), b.wablas_domain || null]);
+         keep(b.fonnte_token, cur.fonnte_token), keep(b.wablas_token, cur.wablas_token), b.wablas_domain || null,
+         keep(b.watzap_api_key, cur.watzap_api_key), keep(b.watzap_number_key, cur.watzap_number_key),
+         b.generic_url || null, b.generic_headers || null, b.generic_body || null]);
       res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });

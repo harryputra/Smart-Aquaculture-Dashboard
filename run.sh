@@ -206,6 +206,7 @@ MIGRATIONS=(
   database/migration-aerator.sql
   database/migration-feedlevel.sql
   database/migration-wa-providers.sql
+  database/migration-wa-providers2.sql
 )
 apply_migrations() {
   load_env
