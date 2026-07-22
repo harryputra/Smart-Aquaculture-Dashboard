@@ -76,8 +76,10 @@ async function main() {
        ON CONFLICT (pond_id) DO UPDATE SET farm_id=EXCLUDED.farm_id, name=EXCLUDED.name,
          fish_count=3000, initial_fish_count=3000, stocking_date='2026-06-05'`,
       [POND, FARM]);
-    await c.query(`INSERT INTO sensor_thresholds (pond_id) SELECT $1 WHERE NOT EXISTS (SELECT 1 FROM sensor_thresholds WHERE pond_id=$1)`, [POND]);
-    await c.query(`INSERT INTO device_status (pond_id, device_id, is_connected) SELECT $1,$2,FALSE WHERE NOT EXISTS (SELECT 1 FROM device_status WHERE pond_id=$1)`, [POND, 'ESP32-' + POND]);
+    if (!(await c.query(`SELECT 1 FROM sensor_thresholds WHERE pond_id=$1`, [POND])).rows.length)
+      await c.query(`INSERT INTO sensor_thresholds (pond_id) VALUES ($1)`, [POND]);
+    if (!(await c.query(`SELECT 1 FROM device_status WHERE pond_id=$1`, [POND])).rows.length)
+      await c.query(`INSERT INTO device_status (pond_id, device_id, is_connected) VALUES ($1,$2,FALSE)`, [POND, 'ESP32-' + POND]);
 
     // Stok pakan (beli 1 kuintal @ Rp 1.245.000 → Rp 12.450/kg; tersisa ~55 kg)
     await c.query(
