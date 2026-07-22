@@ -422,6 +422,7 @@ case "$cmd" in
   reset|hard-reset)   do_reset ;;
   doctor)             do_doctor ;;
   migrate|db-migrate) need_docker; apply_migrations; ok "Migrasi selesai." ;;
+  seed-tiana)         need_docker; dc exec -T backend node scripts/seed-tiana.js ;;
   mqtt-passwd)        need_docker; mqtt_passwd ;;
   mqtt-sub)           mqtt_sub ;;
   mqtt-test)          shift || true; mqtt_test "${1:-}" ;;
