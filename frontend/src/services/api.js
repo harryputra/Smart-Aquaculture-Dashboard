@@ -81,6 +81,25 @@ export const setAerator = (pondId, data) => req(`/aerator/${pondId}`, { method: 
 export const getCycleCompare = () => req('/cycles/compare');
 export const getPondOverview = (pondId) => req(`/ponds/${pondId}/overview`);
 export const getPondFeeder = (pondId) => req(`/ponds/${pondId}/feeder`);
+
+// DB Explorer (Super Admin, read-only)
+export const dbTables = () => req('/db/tables');
+export const dbTable = (name, limit = 100, offset = 0) =>
+  req(`/db/table/${encodeURIComponent(name)}?limit=${limit}&offset=${offset}`);
+export const dbQuery = (sql) => req('/db/query', { method: 'POST', body: { sql } });
+export async function dbExport(body) {
+  const res = await fetch('/api/db/export', {
+    method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `HTTP ${res.status}`); }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = (body.table || 'query') + '.xlsx';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
 export const sendSimulation = (pondId, data) =>
   req(`/control/${pondId}/simulate`, { method: 'POST', body: data });
 

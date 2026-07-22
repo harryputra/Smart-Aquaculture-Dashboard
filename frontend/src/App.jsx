@@ -3,7 +3,7 @@ import { Routes, Route, NavLink, Link, useLocation } from 'react-router-dom';
 import {
   Home, Fish, Activity, BarChart3, Bell, Waves,
   Skull, Utensils, Settings, LayoutGrid, Cpu, Menu, X, Radio, Wrench, Plug, LogOut,
-  Users as UsersIcon, ArrowUpCircle, MessageCircle,
+  Users as UsersIcon, ArrowUpCircle, MessageCircle, Database as DatabaseIcon,
 } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import Farms from './pages/Farms';
@@ -20,6 +20,7 @@ import Firmware from './pages/Firmware';
 import WaterDevices from './pages/WaterDevices';
 import WhatsApp from './pages/WhatsApp';
 import ComparePonds from './pages/ComparePonds';
+import Database from './pages/Database';
 import Login from './pages/Login';
 import QuickLogin from './pages/QuickLogin';
 import Users from './pages/Users';
@@ -45,7 +46,7 @@ export default function App() {
 
 function Shell() {
   const { user, logout } = useAuth();
-  const { canManageUsers } = useCan();
+  const { canManageUsers, isSuper } = useCan();
   const [unreadCount, setUnreadCount] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
@@ -154,6 +155,11 @@ function Shell() {
             <NavLink to="/whatsapp" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
               <MessageCircle size={18} /> <span>Notifikasi WA</span>
             </NavLink>
+            {isSuper && (
+              <NavLink to="/database" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
+                <DatabaseIcon size={18} /> <span>Database</span>
+              </NavLink>
+            )}
           </div>
         )}
 
@@ -194,6 +200,7 @@ function Shell() {
           <Route path="/firmware" element={<Firmware />} />
           <Route path="/users" element={<Users />} />
           <Route path="/whatsapp" element={<WhatsApp />} />
+          <Route path="/database" element={<Database />} />
         </Routes>
       </main>
     </div>

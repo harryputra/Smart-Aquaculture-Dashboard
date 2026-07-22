@@ -1019,6 +1019,9 @@ registerLeleOtaHandlers({ app, pool, mqttClient: leleMqttClient });
 const { registerWaHandlers } = require('./wa-notify');
 registerWaHandlers({ app, pool });
 
+const { registerDbExplorer } = require('./db-explorer');
+registerDbExplorer({ app, pool });
+
 // Pengelolaan siklus budidaya (tebar→panen) — lihat docs/RENCANA-PENGELOLAAN-KOLAM.md
 const { registerCycleHandlers } = require('./cycle-management');
 registerCycleHandlers({ app, pool });
