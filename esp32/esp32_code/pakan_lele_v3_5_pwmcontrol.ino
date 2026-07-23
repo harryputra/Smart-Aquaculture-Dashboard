@@ -965,11 +965,15 @@ void onMqttMessage(const String& topic, const String& payload, const size_t size
     }
     else if (strcmp(command, "manual_feed_gram") == 0) {
       if (feedingInProgress) { publishAck(command, false, "Sedang feeding"); return; }
-      float g = doc["target_g"] | 0.0;
-      if (g < 10 || g > 5000) { publishAck(command, false, "Range 10-5000g"); return; }
+      // JANGAN `doc["target_g"] | 0.0` — di ArduinoJson 6 operator `|` bergantung
+      // is<double>() yg tak reliabel utk JSON integer (backend kirim 100, bukan
+      // 100.0) → jatuh ke 0.0 → ditolak diam2. Pakai .as<float>() + dukung string.
+      JsonVariant tgv = doc["target_g"];
+      float g = tgv.is<const char*>() ? atof(tgv.as<const char*>()) : tgv.as<float>();
+      if (g < 10 || g > 5000) { publishAck(command, false, "Range 10-5000g (baca=" + String(g,1) + ")"); return; }
       pendingCmd.cmd      = CMD_MANUAL_FEED_GRAM;
       pendingCmd.floatArg = g;
-      publishAck(command, true, "Queued");
+      publishAck(command, true, "Queued " + String(g,0) + "g");
     }
     else if (strcmp(command, "set_auto_feed") == 0) {
       bool enabled = doc["enabled"] | false;
