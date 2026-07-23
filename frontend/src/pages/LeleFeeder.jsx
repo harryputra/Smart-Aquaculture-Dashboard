@@ -43,7 +43,12 @@ export default function LeleFeeder() {
     try {
       const r = await getLeleDevices();
       setDevices(r);
-      if (r.length && !selected) setSelected(r[0].device_id);
+      // Jangan pakai `selected` dari closure (bisa basi karena polling tiap 3s);
+      // pakai functional update agar pilihan user tidak ter-reset ke device[0].
+      setSelected(prev => {
+        if (prev && r.some(d => d.device_id === prev)) return prev; // pertahankan pilihan
+        return r.length ? r[0].device_id : null;                    // default awal saja
+      });
     } catch (e) { console.error(e); }
   }
 
