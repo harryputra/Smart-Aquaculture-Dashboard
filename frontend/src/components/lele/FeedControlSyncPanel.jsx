@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Hand, CalendarClock, Sparkles, Utensils, Scale, Loader, CheckCircle } from 'lucide-react';
+import { Hand, CalendarClock, Sparkles, Utensils, Scale, Loader, CheckCircle, AlertTriangle, XCircle } from 'lucide-react';
 import {
-  setFeedMode, getFeedProgress, remoteManualFeed, remoteFeedGram, setSpinner, testSpread, setServoOpen,
+  setFeedMode, getFeedProgress, remoteManualFeed, remoteFeedGram, setSpinner, testSpread, setServoOpen, getLastAck,
 } from '../../services/leleApi';
 
 const MODES = [
@@ -21,6 +21,7 @@ export default function FeedControlSyncPanel({ device }) {
   const [busy, setBusy] = useState(false);
   const [gram, setGram] = useState('');
   const [progress, setProgress] = useState(null);
+  const [feedMsg, setFeedMsg] = useState(null);   // { kind:'sending'|'ok'|'fail'|'timeout', text }
   const timer = useRef(null);
   // pengaturan spinner (nilai awal dari status device)
   const [spnHigh, setSpnHigh] = useState(live.spinner_pwm_high ?? 255);
@@ -49,17 +50,54 @@ export default function FeedControlSyncPanel({ device }) {
     setBusy(true);
     try { await setFeedMode(deviceId, mode); } catch (e) { alert(e.message); } finally { setTimeout(() => setBusy(false), 600); }
   }
+  // Tunggu ACK BARU dari device (beda dari baseline) untuk command tertentu, maks ~7 dtk.
+  async function waitForAck(expectedCmd, baselineTs) {
+    const deadline = Date.now() + 7000;
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 500));
+      try {
+        const a = await getLastAck(deviceId);
+        if (a && a.command === expectedCmd && a.received_at !== baselineTs) return a;
+      } catch (_) { /* ignore */ }
+    }
+    return null;
+  }
+
   async function feedNow(adaptive) {
-    if (!online) { alert('Device offline.'); return; }
+    if (!online) { setFeedMsg({ kind: 'fail', text: 'Device OFFLINE — perintah tidak dikirim.' }); return; }
+    let target_g = null;
+    if (!adaptive) {
+      const g = parseFloat(gram);
+      if (!g || g < 10 || g > 5000) { setFeedMsg({ kind: 'fail', text: 'Isi gram antara 10–5000.' }); return; }
+      target_g = g;
+    }
     setBusy(true);
+    const expectedCmd = adaptive ? 'manual_feed_adaptive' : 'manual_feed_gram';
+    // Rekam ACK terakhir sbg baseline agar bisa deteksi ACK BARU dari device.
+    let baseline = null;
+    try { const a0 = await getLastAck(deviceId); baseline = a0?.received_at ?? null; } catch (_) { /* */ }
+    setFeedMsg({ kind: 'sending', text: adaptive ? 'Mengirim perintah Feed Adaptif…' : `Mengirim perintah beri ${target_g} g…` });
     try {
       if (adaptive) await remoteManualFeed(deviceId);
-      else {
-        const g = parseFloat(gram);
-        if (!g || g < 10 || g > 5000) { alert('Isi gram 10–5000.'); setBusy(false); return; }
-        await remoteFeedGram(deviceId, g);
-      }
-    } catch (e) { alert(e.message); } finally { setTimeout(() => setBusy(false), 600); }
+      else await remoteFeedGram(deviceId, target_g);
+    } catch (e) {
+      setFeedMsg({ kind: 'fail', text: 'Gagal mengirim ke server: ' + e.message });
+      setBusy(false);
+      return;
+    }
+    // Perintah sudah di broker; tunggu device membalas ACK.
+    const ack = await waitForAck(expectedCmd, baseline);
+    if (!ack) {
+      setFeedMsg({
+        kind: 'timeout',
+        text: 'Perintah terkirim ke broker, tapi device belum membalas (ACK). Kemungkinan alat tidak menerima — cek daya/koneksi alat, atau lihat tab Diagnostik.',
+      });
+    } else if (ack.success) {
+      setFeedMsg({ kind: 'ok', text: `Alat menerima perintah ✓ — ${ack.reason || 'Queued'}. Pantau di "Monitor Penimbangan" di atas.` });
+    } else {
+      setFeedMsg({ kind: 'fail', text: `Alat menolak perintah ✗ — ${ack.reason || 'ditolak'}.` });
+    }
+    setBusy(false);
   }
   async function saveSpinner() {
     setBusy(true);
@@ -148,6 +186,7 @@ export default function FeedControlSyncPanel({ device }) {
             <button className="btn btn-secondary" disabled={busy || !online || feeding} onClick={() => feedNow(false)}>Beri</button>
           </div>
         </div>
+        {feedMsg && <FeedMsgBanner msg={feedMsg} />}
         {feeding && <div className="text-xs text-muted" style={{ marginTop: 10 }}>Sedang feeding — tunggu selesai sebelum trigger baru.</div>}
       </div>
 
@@ -205,5 +244,27 @@ export default function FeedControlSyncPanel({ device }) {
 
       <style>{`.spin{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </>
+  );
+}
+
+// Banner hasil perintah beri pakan: kirim → ACK device / ditolak / tak ada respons.
+function FeedMsgBanner({ msg }) {
+  const map = {
+    sending: { bg: 'rgba(6,182,212,0.10)', bd: '#06b6d4', fg: '#0e7490', Icon: Loader, spin: true },
+    ok:      { bg: 'rgba(34,197,94,0.12)', bd: '#22c55e', fg: '#15803d', Icon: CheckCircle },
+    fail:    { bg: 'rgba(239,68,68,0.12)', bd: '#ef4444', fg: '#b91c1c', Icon: XCircle },
+    timeout: { bg: 'rgba(245,158,11,0.12)', bd: '#f59e0b', fg: '#b45309', Icon: AlertTriangle },
+  };
+  const s = map[msg.kind] || map.sending;
+  const { Icon } = s;
+  return (
+    <div style={{
+      marginTop: 12, padding: '10px 14px', borderRadius: 10,
+      background: s.bg, border: `1px solid ${s.bd}`, color: s.fg,
+      display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 13, fontWeight: 600,
+    }}>
+      <Icon size={18} className={s.spin ? 'spin' : ''} style={{ flexShrink: 0, marginTop: 1 }} />
+      <span>{msg.text}</span>
+    </div>
   );
 }
