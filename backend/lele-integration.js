@@ -20,6 +20,20 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
   const ackCache = {};
   const liveDataCache = {};
   const feedProgressCache = {};   // progress penimbangan live per device (in-memory)
+  const lastSeenTouch = {};       // throttle refresh last_seen per device
+
+  // Segarkan last_seen dari SETIAP pesan device (bukan hanya /status). Saat sesi
+  // feeding panjang, firmware hanya publish ke feed/* → tanpa ini device salah
+  // ditandai OFFLINE tiap memberi pakan (plus spam notif offline/online). Throttle
+  // 5 dtk/device agar tak membebani DB. Hanya menyentuh last_seen, tidak mengubah
+  // is_online (transisi online/offline tetap diatur handler status + penanda 30s).
+  function touchLastSeen(deviceId) {
+    if (!deviceId) return;
+    const now = Date.now();
+    if (lastSeenTouch[deviceId] && now - lastSeenTouch[deviceId] < 5000) return;
+    lastSeenTouch[deviceId] = now;
+    pool.query(`UPDATE lele_devices SET last_seen = NOW() WHERE device_id = $1`, [deviceId]).catch(() => {});
+  }
 
   // Rekam lalu lintas MQTT (untuk monitor/diagnostik). Fire-and-forget.
   function recordTraffic(direction, topic, payloadStr, deviceId) {
@@ -45,9 +59,10 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
     try { _did = JSON.parse(_raw).device_id || null; } catch (_) {}
     // Progress penimbangan high-frequency: cache di memori, JANGAN spam DB/log.
     if (topic === 'lele/feed/progress') {
-      try { const p = JSON.parse(_raw); if (p.device_id) feedProgressCache[p.device_id] = { ...p, received_at: Date.now() }; } catch (_) {}
+      try { const p = JSON.parse(_raw); if (p.device_id) { feedProgressCache[p.device_id] = { ...p, received_at: Date.now() }; touchLastSeen(p.device_id); } } catch (_) {}
       return;
     }
+    if (_did) touchLastSeen(_did);   // pesan feed/batch/session/summary/ack juga menyegarkan last_seen
     recordTraffic('in', topic, _raw, _did);
     try {
       const payload = JSON.parse(_raw);
