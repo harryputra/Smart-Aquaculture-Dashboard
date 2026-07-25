@@ -56,7 +56,18 @@ export default function FeedingTab({ pondId }) {
     } catch (e) { console.error(e); }
   }
 
-  useEffect(() => { load(); }, [pondId]);
+  async function loadFeeder() {
+    try {
+      const f = await getPondFeeder(pondId);
+      setFeederData(f);
+    } catch (e) { console.error(e); }
+  }
+
+  useEffect(() => { 
+    load(); 
+    const id = setInterval(loadFeeder, 3000);
+    return () => clearInterval(id);
+  }, [pondId]);
 
   async function addSchedule(e) {
     e.preventDefault();
