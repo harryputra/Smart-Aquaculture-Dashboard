@@ -705,7 +705,6 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
       const perScheduleG = perDay > 0 ? dailyFeedG / perDay : 0;
       const settings = {
         ...dev,
-        is_online: devicePingStatus[dev.device_id] || false,
         feed_mode: live.feed_mode || (dev.auto_feed_enabled ? 'jadwal' : 'manual'),
         feeding_rate_percent: rate, feeding_per_day: perDay,
         avg_fish_g: avgG, fish_count: fishCount,
