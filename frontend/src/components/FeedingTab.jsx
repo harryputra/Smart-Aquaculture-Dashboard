@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import { Plus, Utensils, Trash2, X } from 'lucide-react';
 import {
   getFeedingSchedules, createFeedingSchedule, deleteFeedingSchedule,
-  getFeedingLogs, recordFeeding,
+  getFeedingLogs, recordFeeding, getPondFeeder
 } from '../services/api';
 import FeederDetail from './FeederDetail';
+import JadwalPakanPanel from './lele/JadwalPakanPanel';
 
 const DAYS = [
   { id: 1, label: 'S', name: 'Sen' }, { id: 2, label: 'S', name: 'Sel' },
@@ -23,12 +24,14 @@ export default function FeedingTab({ pondId }) {
     feed_amount_kg: 2.5, feed_type: 'Pelet 781-2', note: '',
   });
   const [logForm, setLogForm] = useState({ feed_amount_kg: 2.5, feed_type: 'Pelet', note: '' });
+  const [feederData, setFeederData] = useState(null);
 
   async function load() {
     try {
-      const [s, l] = await Promise.all([getFeedingSchedules(pondId), getFeedingLogs(pondId)]);
+      const [s, l, f] = await Promise.all([getFeedingSchedules(pondId), getFeedingLogs(pondId), getPondFeeder(pondId)]);
       setSchedules(s);
       setLogs(l);
+      setFeederData(f);
     } catch (e) { console.error(e); }
   }
 
@@ -74,89 +77,97 @@ export default function FeedingTab({ pondId }) {
     <>
       <FeederDetail pondId={pondId} />
 
-      <div className="card mb-6">
-        <div className="card-header">
-          <div>
-            <div className="card-title">Jadwal Pakan Otomatis</div>
-            <div className="card-subtitle">Pakan akan diberikan otomatis sesuai jadwal</div>
-          </div>
-          <div className="flex gap-2">
-            <button className="btn btn-secondary" onClick={() => setShowLogModal(true)}>
-              <Utensils size={16} /> Catat Manual
-            </button>
-            <button className="btn btn-primary" onClick={() => setShowSchModal(true)}>
-              <Plus size={16} /> Tambah Jadwal
-            </button>
-          </div>
+      {feederData?.has_device && feederData?.settings ? (
+        <div style={{ marginTop: 24 }}>
+          <JadwalPakanPanel device={feederData.settings} />
         </div>
+      ) : (
+        <>
+          <div className="card mb-6">
+            <div className="card-header">
+              <div>
+                <div className="card-title">Jadwal Pakan Otomatis</div>
+                <div className="card-subtitle">Pakan akan diberikan otomatis sesuai jadwal</div>
+              </div>
+              <div className="flex gap-2">
+                <button className="btn btn-secondary" onClick={() => setShowLogModal(true)}>
+                  <Utensils size={16} /> Catat Manual
+                </button>
+                <button className="btn btn-primary" onClick={() => setShowSchModal(true)}>
+                  <Plus size={16} /> Tambah Jadwal
+                </button>
+              </div>
+            </div>
 
-        {schedules.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-state-icon"><Utensils size={28} /></div>
-            <h3>Belum ada jadwal pakan</h3>
-            <p>Tambahkan jadwal untuk pemberian pakan otomatis</p>
+            {schedules.length === 0 ? (
+              <div className="empty-state">
+                <div className="empty-state-icon"><Utensils size={28} /></div>
+                <h3>Belum ada jadwal pakan</h3>
+                <p>Tambahkan jadwal untuk pemberian pakan otomatis</p>
+              </div>
+            ) : (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr><th>Waktu</th><th>Hari</th><th>Jumlah</th><th>Jenis</th><th>Catatan</th><th></th></tr>
+                  </thead>
+                  <tbody>
+                    {schedules.map(s => (
+                      <tr key={s.id}>
+                        <td><strong>{s.schedule_time.slice(0, 5)}</strong></td>
+                        <td>{s.schedule_days.split(',').map(d => DAYS.find(x => x.id == d)?.name).join(', ')}</td>
+                        <td>{s.feed_amount_kg} kg</td>
+                        <td>{s.feed_type || '-'}</td>
+                        <td>{s.note || '-'}</td>
+                        <td>
+                          <button className="btn btn-icon btn-secondary" onClick={() => delSchedule(s.id)}>
+                            <Trash2 size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr><th>Waktu</th><th>Hari</th><th>Jumlah</th><th>Jenis</th><th>Catatan</th><th></th></tr>
-              </thead>
-              <tbody>
-                {schedules.map(s => (
-                  <tr key={s.id}>
-                    <td><strong>{s.schedule_time.slice(0, 5)}</strong></td>
-                    <td>{s.schedule_days.split(',').map(d => DAYS.find(x => x.id == d)?.name).join(', ')}</td>
-                    <td>{s.feed_amount_kg} kg</td>
-                    <td>{s.feed_type || '-'}</td>
-                    <td>{s.note || '-'}</td>
-                    <td>
-                      <button className="btn btn-icon btn-secondary" onClick={() => delSchedule(s.id)}>
-                        <Trash2 size={14} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
 
-      <div className="card">
-        <div className="card-header">
-          <div>
-            <div className="card-title">Riwayat Pemberian Pakan</div>
-            <div className="card-subtitle">50 pemberian terakhir</div>
+          <div className="card">
+            <div className="card-header">
+              <div>
+                <div className="card-title">Riwayat Pemberian Pakan</div>
+                <div className="card-subtitle">50 pemberian terakhir</div>
+              </div>
+            </div>
+            {logs.length === 0 ? (
+              <div className="empty-state"><p>Belum ada riwayat pakan</p></div>
+            ) : (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr><th>Tanggal & Waktu</th><th>Jumlah</th><th>Jenis</th><th>Sumber</th><th>Catatan</th></tr>
+                  </thead>
+                  <tbody>
+                    {logs.map(l => (
+                      <tr key={l.id}>
+                        <td>{new Date(l.timestamp).toLocaleString('id-ID')}</td>
+                        <td><strong>{l.feed_amount_kg} kg</strong></td>
+                        <td>{l.feed_type || '-'}</td>
+                        <td>
+                          <span className={`badge ${l.triggered_by === 'schedule' ? 'badge-info' : 'badge-neutral'}`}>
+                            {l.triggered_by === 'schedule' ? 'Jadwal' : 'Manual'}
+                          </span>
+                        </td>
+                        <td>{l.note || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
-        </div>
-        {logs.length === 0 ? (
-          <div className="empty-state"><p>Belum ada riwayat pakan</p></div>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr><th>Tanggal & Waktu</th><th>Jumlah</th><th>Jenis</th><th>Sumber</th><th>Catatan</th></tr>
-              </thead>
-              <tbody>
-                {logs.map(l => (
-                  <tr key={l.id}>
-                    <td>{new Date(l.timestamp).toLocaleString('id-ID')}</td>
-                    <td><strong>{l.feed_amount_kg} kg</strong></td>
-                    <td>{l.feed_type || '-'}</td>
-                    <td>
-                      <span className={`badge ${l.triggered_by === 'schedule' ? 'badge-info' : 'badge-neutral'}`}>
-                        {l.triggered_by === 'schedule' ? 'Jadwal' : 'Manual'}
-                      </span>
-                    </td>
-                    <td>{l.note || '-'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+        </>
+      )}
 
       {showSchModal && (
         <div className="modal-overlay" onClick={() => setShowSchModal(false)}>
