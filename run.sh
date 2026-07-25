@@ -207,6 +207,7 @@ MIGRATIONS=(
   database/migration-feedlevel.sql
   database/migration-wa-providers.sql
   database/migration-wa-providers2.sql
+  database/migration-partial-harvest.sql
 )
 apply_migrations() {
   load_env

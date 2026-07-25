@@ -159,6 +159,9 @@ export const harvestCycle = (pondId, data) =>
 export const getCycles = (pondId) => req(`/ponds/${pondId}/cycles`);
 export const cancelCycle = (pondId, notes) =>
   req(`/ponds/${pondId}/cycle/cancel`, { method: 'POST', body: { notes } });
+export const getHarvestRecords = (pondId) => req(`/ponds/${pondId}/cycle/harvests`);
+export const addPartialHarvest = (pondId, data) =>
+  req(`/ponds/${pondId}/cycle/harvest-partial`, { method: 'POST', body: data });
 
 // Sampling Biomassa & Pertumbuhan
 export const getCurrentBiomass = (pondId) => req(`/ponds/${pondId}/biomass/current`);

@@ -10,18 +10,33 @@ function registerCycleHandlers({ app, pool }) {
   function genCycleId(pondId) {
     return 'cyc_' + pondId + '_' + Date.now().toString(36);
   }
+  function genHarvestId(pondId) {
+    return 'hvst_' + pondId + '_' + Date.now().toString(36);
+  }
 
   // Metrik turunan untuk satu siklus (dipakai siklus aktif).
   async function cycleMetrics(cycle) {
-    const [mort, feed, samp] = await Promise.all([
+    const [mort, feed, samp, harvR] = await Promise.all([
       pool.query(`SELECT COALESCE(SUM(death_count),0) AS d FROM mortality_records WHERE cycle_id=$1`, [cycle.cycle_id]),
       pool.query(`SELECT COALESCE(SUM(feed_amount_kg),0) AS kg FROM feeding_logs WHERE cycle_id=$1`, [cycle.cycle_id]),
       pool.query(`SELECT avg_weight_g FROM biomass_samples WHERE cycle_id=$1 AND status='completed' ORDER BY sampled_at DESC LIMIT 1`, [cycle.cycle_id]),
+      pool.query(`SELECT COALESCE(SUM(total_weight_kg),0) AS total_kg,
+                         COALESCE(SUM(fish_count),0)      AS total_fish,
+                         COALESCE(SUM(revenue),0)         AS total_rev,
+                         COUNT(*)::int                    AS harvest_count
+                  FROM harvest_records WHERE cycle_id=$1`, [cycle.cycle_id]).catch(() => ({ rows: [{ total_kg: 0, total_fish: 0, total_rev: 0, harvest_count: 0 }] })),
     ]);
     const deaths = parseInt(mort.rows[0].d) || 0;
     const initial = cycle.initial_stock || 0;
-    const population = Math.max(0, initial - deaths);
-    const survival_rate = initial > 0 ? (population / initial) * 100 : 0;
+
+    // Sisa populasi = initial - mati - sudah dipanen parsial
+    const total_harvested_fish = parseInt(harvR.rows[0]?.total_fish) || 0;
+    const total_harvested_kg   = parseFloat(harvR.rows[0]?.total_kg)  || 0;
+    const total_harvest_revenue = parseFloat(harvR.rows[0]?.total_rev) || 0;
+    const harvest_count        = parseInt(harvR.rows[0]?.harvest_count) || 0;
+
+    const population = Math.max(0, initial - deaths - total_harvested_fish);
+    const survival_rate = initial > 0 ? ((initial - deaths) / initial) * 100 : 0;
     const total_feed_kg = parseFloat(feed.rows[0].kg) || 0;
 
     let avg_weight_g = samp.rows[0] ? parseFloat(samp.rows[0].avg_weight_g) : null;
@@ -34,7 +49,9 @@ function registerCycleHandlers({ app, pool }) {
     }
     const est_biomass_kg = avg_weight_g != null ? (population * avg_weight_g) / 1000 : null;
     const days = Math.max(0, Math.floor((Date.now() - new Date(cycle.start_date).getTime()) / 86400000));
-    const fcr_est = est_biomass_kg && est_biomass_kg > 0 ? total_feed_kg / est_biomass_kg : null;
+    // FCR estimasi: total pakan / (biomassa yg masih ada + yang sudah dipanen)
+    const harvestedAndLiving = (est_biomass_kg || 0) + total_harvested_kg;
+    const fcr_est = harvestedAndLiving > 0 ? total_feed_kg / harvestedAndLiving : null;
 
     // proyeksi hari ke target berat (asumsi laju linear dari berat skrg)
     let days_to_target = null;
@@ -54,6 +71,11 @@ function registerCycleHandlers({ app, pool }) {
       avg_weight_g: r2(avg_weight_g),
       est_biomass_kg: r2(est_biomass_kg),
       days, fcr_est: r3(fcr_est), days_to_target,
+      // Data panen parsial
+      total_harvested_fish,
+      total_harvested_kg: r2(total_harvested_kg),
+      total_harvest_revenue: r2(total_harvest_revenue),
+      harvest_count,
     };
   }
 
@@ -186,7 +208,89 @@ function registerCycleHandlers({ app, pool }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  // ---- Panen (tutup siklus + hitung performa & ekonomi) ----
+  // ---- Daftar panen parsial siklus aktif ----
+  app.get('/api/ponds/:pondId/cycle/harvests', async (req, res) => {
+    const pondId = req.params.pondId;
+    try {
+      const cr = await pool.query(
+        `SELECT cycle_id FROM pond_cycles WHERE pond_id=$1 AND status='active' ORDER BY start_date DESC LIMIT 1`, [pondId]);
+      if (!cr.rows.length) return res.json([]);
+      const r = await pool.query(
+        `SELECT * FROM harvest_records WHERE cycle_id=$1 ORDER BY harvest_no ASC`,
+        [cr.rows[0].cycle_id]
+      );
+      res.json(r.rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ---- Panen parsial (siklus tetap aktif) ----
+  app.post('/api/ponds/:pondId/cycle/harvest-partial', async (req, res) => {
+    const pondId = req.params.pondId;
+    try {
+      const cr = await pool.query(
+        `SELECT * FROM pond_cycles WHERE pond_id=$1 AND status='active' ORDER BY start_date DESC LIMIT 1`, [pondId]);
+      if (!cr.rows.length) return res.status(400).json({ error: 'Tidak ada siklus aktif.' });
+      const cycle = cr.rows[0];
+
+      let { fish_count = 0, avg_weight_g = null, total_weight_kg = null,
+            price_per_kg = 0, harvest_date = null, notes = null } = req.body || {};
+
+      fish_count    = parseInt(fish_count)    || 0;
+      avg_weight_g  = avg_weight_g  != null ? parseFloat(avg_weight_g)  : null;
+      price_per_kg  = parseFloat(price_per_kg) || 0;
+
+      if (fish_count <= 0) return res.status(400).json({ error: 'Jumlah ekor (fish_count) wajib > 0.' });
+
+      // Hitung total berat: prioritaskan total_weight_kg jika diisi manual
+      if (total_weight_kg != null && parseFloat(total_weight_kg) > 0) {
+        total_weight_kg = parseFloat(total_weight_kg);
+        // back-calculate avg jika belum diisi
+        if (avg_weight_g == null) avg_weight_g = (total_weight_kg * 1000) / fish_count;
+      } else if (avg_weight_g != null && avg_weight_g > 0) {
+        total_weight_kg = (fish_count * avg_weight_g) / 1000;
+      } else {
+        return res.status(400).json({ error: 'Isi berat rata-rata per ekor (avg_weight_g) atau total berat (total_weight_kg).' });
+      }
+
+      const revenue = total_weight_kg * price_per_kg;
+
+      // Nomor urut panen
+      const cntR = await pool.query(`SELECT COUNT(*) AS c FROM harvest_records WHERE cycle_id=$1`, [cycle.cycle_id]);
+      const harvest_no = (parseInt(cntR.rows[0].c) || 0) + 1;
+
+      const harvestId = genHarvestId(pondId);
+      const hr = await pool.query(
+        `INSERT INTO harvest_records
+           (harvest_id, cycle_id, pond_id, harvest_no, harvest_date, fish_count,
+            avg_weight_g, total_weight_kg, price_per_kg, revenue, is_final, notes)
+         VALUES ($1,$2,$3,$4,COALESCE($5,CURRENT_DATE),$6,$7,$8,$9,$10,FALSE,$11)
+         RETURNING *`,
+        [harvestId, cycle.cycle_id, pondId, harvest_no, harvest_date,
+         fish_count, r2(avg_weight_g), r2(total_weight_kg), r2(price_per_kg), r2(revenue), notes]
+      );
+
+      // Akumulasi di pond_cycles
+      await pool.query(
+        `UPDATE pond_cycles SET
+           partial_harvest_count  = COALESCE(partial_harvest_count,0)  + 1,
+           total_harvested_kg     = COALESCE(total_harvested_kg,0)     + $2,
+           total_harvested_fish   = COALESCE(total_harvested_fish,0)   + $3,
+           total_harvest_revenue  = COALESCE(total_harvest_revenue,0)  + $4
+         WHERE cycle_id=$1`,
+        [cycle.cycle_id, r2(total_weight_kg), fish_count, r2(revenue)]
+      );
+
+      // Kurangi populasi kolam
+      await pool.query(
+        `UPDATE ponds SET fish_count = GREATEST(0, fish_count - $1) WHERE pond_id=$2`,
+        [fish_count, pondId]
+      );
+
+      res.json(hr.rows[0]);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ---- Panen Final (tutup siklus + rekap semua panen parsial + hitung performa & ekonomi) ----
   app.post('/api/ponds/:pondId/cycle/harvest', async (req, res) => {
     const pondId = req.params.pondId;
     try {
@@ -195,40 +299,127 @@ function registerCycleHandlers({ app, pool }) {
       if (!cr.rows.length) return res.status(400).json({ error: 'Tidak ada siklus aktif untuk dipanen.' });
       const cycle = cr.rows[0];
 
-      const { harvest_total_kg, harvest_price_per_kg = 0, harvest_date = null, notes = null } = req.body || {};
-      if (harvest_total_kg == null || harvest_total_kg < 0) {
-        return res.status(400).json({ error: 'harvest_total_kg wajib diisi.' });
+      let { fish_count = 0, avg_weight_g = null, total_weight_kg = null,
+            harvest_price_per_kg = 0, harvest_date = null, notes = null } = req.body || {};
+
+      // --- Catat panen final jika masih ada ikan sisa yang dipanen ---
+      fish_count   = parseInt(fish_count)    || 0;
+      avg_weight_g = avg_weight_g != null ? parseFloat(avg_weight_g) : null;
+      harvest_price_per_kg = parseFloat(harvest_price_per_kg) || 0;
+
+      let finalKg = 0;
+      let finalRevenue = 0;
+
+      if (fish_count > 0 || (total_weight_kg != null && parseFloat(total_weight_kg) > 0)) {
+        // Ada panen sisa → hitung berat
+        if (total_weight_kg != null && parseFloat(total_weight_kg) > 0) {
+          finalKg = parseFloat(total_weight_kg);
+          if (avg_weight_g == null && fish_count > 0) avg_weight_g = (finalKg * 1000) / fish_count;
+        } else if (avg_weight_g != null && avg_weight_g > 0 && fish_count > 0) {
+          finalKg = (fish_count * avg_weight_g) / 1000;
+        }
+        finalRevenue = finalKg * harvest_price_per_kg;
+
+        const cntR = await pool.query(`SELECT COUNT(*) AS c FROM harvest_records WHERE cycle_id=$1`, [cycle.cycle_id]);
+        const harvest_no = (parseInt(cntR.rows[0].c) || 0) + 1;
+        const harvestId = genHarvestId(pondId);
+
+        await pool.query(
+          `INSERT INTO harvest_records
+             (harvest_id, cycle_id, pond_id, harvest_no, harvest_date, fish_count,
+              avg_weight_g, total_weight_kg, price_per_kg, revenue, is_final, notes)
+           VALUES ($1,$2,$3,$4,COALESCE($5,CURRENT_DATE),$6,$7,$8,$9,$10,TRUE,$11)`,
+          [harvestId, cycle.cycle_id, pondId, harvest_no, harvest_date,
+           fish_count, r2(avg_weight_g), r2(finalKg), r2(harvest_price_per_kg), r2(finalRevenue), notes]
+        );
+
+        // Akumulasi
+        await pool.query(
+          `UPDATE pond_cycles SET
+             partial_harvest_count  = COALESCE(partial_harvest_count,0)  + 1,
+             total_harvested_kg     = COALESCE(total_harvested_kg,0)     + $2,
+             total_harvested_fish   = COALESCE(total_harvested_fish,0)   + $3,
+             total_harvest_revenue  = COALESCE(total_harvest_revenue,0)  + $4
+           WHERE cycle_id=$1`,
+          [cycle.cycle_id, r2(finalKg), fish_count, r2(finalRevenue)]
+        );
+
+        // Kurangi populasi
+        if (fish_count > 0) {
+          await pool.query(
+            `UPDATE ponds SET fish_count = GREATEST(0, fish_count - $1) WHERE pond_id=$2`,
+            [fish_count, pondId]
+          );
+        }
+      } else {
+        // Tidak ada panen sisa — tandai harvest record terakhir sebagai final
+        await pool.query(
+          `UPDATE harvest_records SET is_final=TRUE
+           WHERE cycle_id=$1 AND harvest_no=(
+             SELECT MAX(harvest_no) FROM harvest_records WHERE cycle_id=$1
+           )`,
+          [cycle.cycle_id]
+        );
       }
 
+      // --- Rekap total dari semua harvest_records ---
+      const totals = await pool.query(
+        `SELECT COALESCE(SUM(total_weight_kg),0) AS total_kg,
+                COALESCE(SUM(fish_count),0)       AS total_fish,
+                COALESCE(SUM(revenue),0)          AS total_rev
+         FROM harvest_records WHERE cycle_id=$1`,
+        [cycle.cycle_id]
+      );
+      const harvest_total_kg  = parseFloat(totals.rows[0].total_kg)  || 0;
+      const total_harv_rev    = parseFloat(totals.rows[0].total_rev)  || 0;
+
       const m = await cycleMetrics(cycle);
-      const revenue = harvest_total_kg * harvest_price_per_kg;
       const fcr = harvest_total_kg > 0 ? m.total_feed_kg / harvest_total_kg : null;
 
-      // biaya: benih + pakan (total kg × harga) + operasional
+      // biaya: benih + pakan + operasional
       const fsR = await pool.query(`SELECT price_per_kg FROM feed_stock WHERE pond_id=$1`, [pondId]).catch(() => ({ rows: [] }));
       const feedPrice = fsR.rows[0] ? parseFloat(fsR.rows[0].price_per_kg) || 0 : 0;
       const feed_cost = m.total_feed_kg * feedPrice;
       const opR = await pool.query(`SELECT COALESCE(SUM(amount),0) AS s FROM operational_costs WHERE cycle_id=$1`, [cycle.cycle_id]);
-      const op_cost = parseFloat(opR.rows[0].s) || 0;
+      const op_cost  = parseFloat(opR.rows[0].s) || 0;
       const fry_cost = parseFloat(cycle.fry_cost_total) || 0;
       const total_cost = fry_cost + feed_cost + op_cost;
-      const profit = revenue - total_cost;
-      const roi = total_cost > 0 ? (profit / total_cost) * 100 : null;
+      const profit = total_harv_rev - total_cost;
+      const roi    = total_cost > 0 ? (profit / total_cost) * 100 : null;
 
       const upd = await pool.query(
         `UPDATE pond_cycles SET status='completed',
-           harvest_date=COALESCE($2,CURRENT_DATE), harvest_total_kg=$3, harvest_price_per_kg=$4,
-           harvest_revenue=$5, survival_rate=$6, fcr=$7, total_feed_kg=$8,
-           total_cost=$9, profit=$10, roi=$11, notes=COALESCE($12, notes)
+           harvest_date=COALESCE($2,CURRENT_DATE),
+           harvest_total_kg=$3, harvest_revenue=$4,
+           survival_rate=$5, fcr=$6, total_feed_kg=$7,
+           total_cost=$8, profit=$9, roi=$10,
+           total_harvested_kg=$3, total_harvest_revenue=$4,
+           notes=COALESCE($11, notes)
          WHERE cycle_id=$1 RETURNING *`,
-        [cycle.cycle_id, harvest_date, harvest_total_kg, harvest_price_per_kg, revenue,
-         m.survival_rate, r3(fcr), m.total_feed_kg, r2(total_cost), r2(profit), r2(roi), notes]);
+        [cycle.cycle_id, harvest_date, r2(harvest_total_kg), r2(total_harv_rev),
+         m.survival_rate, r3(fcr), m.total_feed_kg,
+         r2(total_cost), r2(profit), r2(roi), notes]
+      );
+
+      // Ambil riwayat panen parsial untuk disertakan dalam respons
+      const harvests = (await pool.query(
+        `SELECT harvest_no, harvest_date, fish_count, avg_weight_g, total_weight_kg, price_per_kg, revenue, is_final, notes
+         FROM harvest_records WHERE cycle_id=$1 ORDER BY harvest_no ASC`,
+        [cycle.cycle_id]
+      )).rows;
 
       res.json({
         ...upd.rows[0],
-        breakdown: { revenue: r2(revenue), fry_cost: r2(fry_cost), feed_cost: r2(feed_cost),
-          op_cost: r2(op_cost), total_cost: r2(total_cost), profit: r2(profit), roi: r2(roi),
-          fcr: r3(fcr), survival_rate: m.survival_rate, population: m.population },
+        breakdown: {
+          revenue: r2(total_harv_rev), fry_cost: r2(fry_cost),
+          feed_cost: r2(feed_cost), op_cost: r2(op_cost),
+          total_cost: r2(total_cost), profit: r2(profit), roi: r2(roi),
+          fcr: r3(fcr), survival_rate: m.survival_rate,
+          total_harvested_kg: r2(harvest_total_kg),
+          total_harvested_fish: parseInt(totals.rows[0].total_fish) || 0,
+          harvest_count: harvests.length,
+        },
+        harvests,
       });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
