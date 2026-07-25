@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
-  ArrowLeft, Wifi, WifiOff, Activity, Power, Utensils, Skull,
+  ArrowLeft, Wifi, WifiOff, Zap, Activity, Power, Utensils, Skull,
   Calendar, FileText, Settings, AlertCircle, Sprout, Scale, Wallet, ClipboardList,
 } from 'lucide-react';
 import { getPond, getSensorHistory } from '../services/api';
@@ -41,6 +41,8 @@ export default function PondDetail() {
   if (!pond) return <div className="loading"><div className="spinner" /></div>;
 
   const isConnected = pond.is_connected;
+  const feederOnline = pond.feeder_is_online;
+  const hasLiveDevice = isConnected || feederOnline;
 
   // Dikelompokkan: Budidaya (manajemen siklus) vs Operasional (harian/hardware).
   const GROUPS = [
@@ -74,13 +76,15 @@ export default function PondDetail() {
             {pond.fish_type} · {pond.fish_count} ekor · Luas {pond.size_m2} m²
           </p>
         </div>
-        <div className={`mode-indicator ${isConnected ? 'live' : 'dummy'}`}>
+        <div className={`mode-indicator ${hasLiveDevice ? 'live' : 'dummy'}`}>
           <span className="pulse" />
-          {isConnected ? <><Wifi size={14} /> ESP32 Terhubung</> : <><WifiOff size={14} /> Mode Dummy</>}
+          {isConnected ? <><Wifi size={14} /> ESP32 Terhubung</> :
+           feederOnline ? <><Zap size={14} /> Feeder Online</> :
+           <><WifiOff size={14} /> Mode Dummy</>}
         </div>
       </div>
 
-      {!isConnected && (
+      {!hasLiveDevice && (
         <div className="alert alert-info">
           <AlertCircle size={18} />
           <div>

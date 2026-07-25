@@ -530,10 +530,14 @@ app.delete('/api/farms/:id', async (req, res) => {
 app.get('/api/ponds', async (req, res) => {
   try {
     const { farm_id, include_archived } = req.query;
-    let q = `SELECT p.*, ds.is_connected, ds.last_seen
+    let q = `SELECT p.*, ds.is_connected, ds.last_seen,
+               ld.device_id  AS feeder_device_id,
+               ld.name       AS feeder_name,
+               ld.is_online  AS feeder_is_online
              FROM ponds p
              LEFT JOIN device_status ds ON p.pond_id = ds.pond_id
-             LEFT JOIN farms fa ON p.farm_id = fa.farm_id`;
+             LEFT JOIN farms fa ON p.farm_id = fa.farm_id
+             LEFT JOIN lele_devices ld ON ld.pond_id = p.pond_id`;
     const params = [];
     const where = [];
     if (farm_id) { params.push(farm_id); where.push(`p.farm_id = $${params.length}`); }
@@ -550,6 +554,9 @@ app.get('/api/ponds/:id', async (req, res) => {
   try {
     const r = await pool.query(`
       SELECT p.*, ds.is_connected, ds.last_seen, ds.device_id,
+        ld.device_id  AS feeder_device_id,
+        ld.name       AS feeder_name,
+        ld.is_online  AS feeder_is_online,
         (SELECT row_to_json(s) FROM (
            SELECT * FROM sensor_data WHERE pond_id = p.pond_id ORDER BY timestamp DESC LIMIT 1
         ) s) as latest_sensor,
@@ -557,6 +564,7 @@ app.get('/api/ponds/:id', async (req, res) => {
       FROM ponds p
       LEFT JOIN device_status ds ON p.pond_id = ds.pond_id
       LEFT JOIN farms fa ON p.farm_id = fa.farm_id
+      LEFT JOIN lele_devices ld ON ld.pond_id = p.pond_id
       WHERE p.pond_id = $1 AND ($2::text IS NULL OR fa.org_id = $2)`, [req.params.id, req.auth?.org || null]);
     if (!r.rows.length) return res.status(404).json({ error: 'Not found' });
     res.json(r.rows[0]);

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Plus, Droplets, Wifi, WifiOff, ArrowLeft, Trash2, X, MapPin } from 'lucide-react';
+import { Plus, Droplets, Wifi, WifiOff, Zap, ArrowLeft, Trash2, X, MapPin } from 'lucide-react';
 import { getFarm, getPonds, createPond, deletePond } from '../services/api';
 import { getLeleDevices, assignLeleDevice } from '../services/leleApi';
 import { useCan } from '../context/AuthContext';
@@ -98,11 +98,21 @@ export default function FarmDetail() {
                 </button>
               )}
               <Link to={`/ponds/${p.pond_id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-                <div className="pond-card-header">
+                  <div className="pond-card-header">
                   <div className="pond-card-icon"><Droplets size={22} /></div>
-                  <div className={`mode-indicator ${p.is_connected ? 'live' : 'dummy'}`}>
-                    {p.is_connected ? <><Wifi size={12} /> ESP32</> : <><WifiOff size={12} /> Dummy</>}
-                  </div>
+                  {p.is_connected ? (
+                    <div className="mode-indicator live">
+                      <Wifi size={12} /> ESP32
+                    </div>
+                  ) : p.feeder_is_online ? (
+                    <div className="mode-indicator live">
+                      <Zap size={12} /> Feeder
+                    </div>
+                  ) : (
+                    <div className="mode-indicator dummy">
+                      <WifiOff size={12} /> Dummy
+                    </div>
+                  )}
                 </div>
                 <div className="pond-card-name">{p.name}</div>
                 <div className="pond-card-type">{p.fish_type}</div>
