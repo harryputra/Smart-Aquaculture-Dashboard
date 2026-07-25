@@ -131,6 +131,8 @@ export const getMortalityRecords = (pondId) => req(`/mortality/${pondId}`);
 export const getMortalitySummary = (pondId) => req(`/mortality/${pondId}/summary`);
 export const recordMortality = (data) =>
   req('/mortality', { method: 'POST', body: data });
+export const updateMortality = (id, data) =>
+  req(`/mortality/${id}`, { method: 'PUT', body: data });
 export const deleteMortality = (id) => req(`/mortality/${id}`, { method: 'DELETE' });
 
 // Notifications

@@ -902,12 +902,21 @@ app.get('/api/mortality/:pondId/summary', async (req, res) => {
 
 app.post('/api/mortality', async (req, res) => {
   try {
-    const { pond_id, death_count, cause, note } = req.body;
-    const r = await pool.query(
-      `INSERT INTO mortality_records (pond_id, death_count, cause, note) 
-       VALUES ($1,$2,$3,$4) RETURNING *`,
-      [pond_id, death_count, cause, note]
-    );
+    const { pond_id, death_count, cause, note, recorded_at } = req.body;
+    let r;
+    if (recorded_at) {
+      r = await pool.query(
+        `INSERT INTO mortality_records (pond_id, death_count, cause, note, recorded_at) 
+         VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+        [pond_id, death_count, cause, note, recorded_at]
+      );
+    } else {
+      r = await pool.query(
+        `INSERT INTO mortality_records (pond_id, death_count, cause, note) 
+         VALUES ($1,$2,$3,$4) RETURNING *`,
+        [pond_id, death_count, cause, note]
+      );
+    }
 
     // Kurangi fish_count
     await pool.query(
@@ -929,6 +938,40 @@ app.delete('/api/mortality/:id', async (req, res) => {
   try {
     await pool.query(`DELETE FROM mortality_records WHERE id = $1`, [req.params.id]);
     res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/mortality/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { death_count, cause, note, recorded_at } = req.body;
+    
+    // Ambil data lama untuk menghitung selisih death_count
+    const oldR = await pool.query('SELECT death_count, pond_id FROM mortality_records WHERE id = $1', [id]);
+    if (oldR.rows.length === 0) return res.status(404).json({ error: 'Data not found' });
+    const oldData = oldR.rows[0];
+    
+    let query = `UPDATE mortality_records SET death_count=$1, cause=$2, note=$3`;
+    let params = [death_count, cause, note, id];
+    
+    if (recorded_at) {
+      query += `, recorded_at=$5`;
+      params = [death_count, cause, note, id, recorded_at];
+    }
+    query += ` WHERE id=$4 RETURNING *`;
+    
+    const r = await pool.query(query, params);
+    
+    // Sesuaikan fish_count jika death_count berubah
+    const diff = death_count - oldData.death_count;
+    if (diff !== 0) {
+      await pool.query(
+        `UPDATE ponds SET fish_count = GREATEST(0, fish_count - $1) WHERE pond_id = $2`,
+        [diff, oldData.pond_id]
+      );
+    }
+    
+    res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

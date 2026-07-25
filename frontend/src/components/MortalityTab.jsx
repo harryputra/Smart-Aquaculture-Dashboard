@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Plus, Skull, Trash2, X, Droplets, AlertTriangle } from 'lucide-react';
 import {
-  getMortalityRecords, getMortalitySummary, recordMortality, deleteMortality, getWaterAudit,
+  getMortalityRecords, getMortalitySummary, recordMortality, updateMortality, deleteMortality, getWaterAudit,
 } from '../services/api';
 
 export default function MortalityTab({ pondId }) {
   const [records, setRecords] = useState([]);
   const [summary, setSummary] = useState(null);
   const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState({ death_count: 1, cause: 'tidak_diketahui', note: '' });
+  const [form, setForm] = useState({ id: null, death_count: 1, cause: 'tidak_diketahui', note: '', recorded_at: '' });
 
   async function load() {
     try {
@@ -23,16 +23,40 @@ export default function MortalityTab({ pondId }) {
   async function submit(e) {
     e.preventDefault();
     try {
-      await recordMortality({
+      const payload = {
         pond_id: pondId,
         death_count: +form.death_count,
         cause: form.cause,
         note: form.note,
-      });
+      };
+      if (form.recorded_at) {
+        payload.recorded_at = form.recorded_at;
+      }
+      
+      if (form.id) {
+        await updateMortality(form.id, payload);
+      } else {
+        await recordMortality(payload);
+      }
       setShowModal(false);
-      setForm({ death_count: 1, cause: 'tidak_diketahui', note: '' });
+      setForm({ id: null, death_count: 1, cause: 'tidak_diketahui', note: '', recorded_at: '' });
       load();
     } catch (e) { alert(e.message); }
+  }
+  
+  function handleEdit(r) {
+    const dt = new Date(r.recorded_at);
+    // Format to YYYY-MM-DDThh:mm for datetime-local input
+    const localDateTime = new Date(dt.getTime() - (dt.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
+    
+    setForm({
+      id: r.id,
+      death_count: r.death_count,
+      cause: r.cause,
+      note: r.note || '',
+      recorded_at: localDateTime
+    });
+    setShowModal(true);
   }
 
   async function del(id) {
@@ -93,7 +117,10 @@ export default function MortalityTab({ pondId }) {
             <div className="card-title">Riwayat Kematian</div>
             <div className="card-subtitle">Catatan setiap kejadian kematian ikan</div>
           </div>
-          <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+          <button className="btn btn-primary" onClick={() => {
+            setForm({ id: null, death_count: 1, cause: 'tidak_diketahui', note: '', recorded_at: '' });
+            setShowModal(true);
+          }}>
             <Plus size={16} /> Catat Kematian
           </button>
         </div>
@@ -118,9 +145,14 @@ export default function MortalityTab({ pondId }) {
                     <td><span className="badge badge-warning">{r.cause.replace(/_/g, ' ')}</span></td>
                     <td>{r.note || '-'}</td>
                     <td>
-                      <button className="btn btn-icon btn-secondary" onClick={() => del(r.id)}>
-                        <Trash2 size={14} />
-                      </button>
+                      <div className="flex gap-2">
+                        <button className="btn btn-icon btn-secondary" onClick={() => handleEdit(r)} title="Edit">
+                          ✏️
+                        </button>
+                        <button className="btn btn-icon btn-secondary" onClick={() => del(r.id)} title="Hapus">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -173,10 +205,17 @@ export default function MortalityTab({ pondId }) {
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h2 className="modal-title">Catat Kematian Ikan</h2>
+              <h2 className="modal-title">{form.id ? 'Edit Data Kematian' : 'Catat Kematian Ikan'}</h2>
               <button className="modal-close" onClick={() => setShowModal(false)}><X size={20} /></button>
             </div>
             <form onSubmit={submit}>
+              <div className="form-group">
+                <label className="form-label">Tanggal & Waktu</label>
+                <input type="datetime-local" className="form-input" value={form.recorded_at}
+                  onChange={e => setForm({ ...form, recorded_at: e.target.value })} 
+                  style={{ width: '100%' }} />
+                <div className="text-xs text-muted" style={{ marginTop: 4 }}>Kosongkan untuk menggunakan waktu saat ini.</div>
+              </div>
               <div className="form-group">
                 <label className="form-label">Jumlah Ikan Mati *</label>
                 <input type="number" min="1" required className="form-input" value={form.death_count}
