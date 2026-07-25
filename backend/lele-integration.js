@@ -711,6 +711,7 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
         next_schedule_hhmm: dev.next_schedule_hhmm || live.next_schedule_hhmm || null,
         daily_feed_g: Math.round(dailyFeedG), per_schedule_g: Math.round(perScheduleG),
         last_feed_time: dev.last_feed_time, sample_ready: dev.sample_ready,
+        live_data: live,
       };
       const sessions = (await pool.query(
         `SELECT session_name, target_total_g, actual_total_g, planned_batch_count, actual_batch_count,
