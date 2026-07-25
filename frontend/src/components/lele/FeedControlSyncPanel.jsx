@@ -3,6 +3,7 @@ import { Hand, CalendarClock, Sparkles, Utensils, Scale, Loader, CheckCircle, Al
 import {
   setFeedMode, getFeedProgress, remoteManualFeed, remoteFeedGram, setSpinner, testSpread, setServoOpen, getLastAck,
 } from '../../services/leleApi';
+import JadwalPakanPanel from './JadwalPakanPanel';
 
 const MODES = [
   { id: 'manual', label: 'Manual', icon: Hand, desc: 'Hanya saat ditekan (hardware/dashboard)' },
@@ -172,23 +173,38 @@ export default function FeedControlSyncPanel({ device }) {
       </div>
 
       {/* KONTROL MANUAL */}
-      <div className="card">
-        <div className="card-header"><div><div className="card-title"><Utensils size={18} style={{ verticalAlign: -3 }} /> Beri Pakan Manual</div><div className="card-subtitle">Dari dashboard — setara tombol di panel hardware</div></div></div>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <button className="btn btn-primary" disabled={busy || !online || feeding} onClick={() => feedNow(true)}>
-            <Sparkles size={16} /> Feed Adaptif (otomatis dari biomassa)
-          </button>
-          <div className="flex items-end gap-2">
-            <div className="form-group" style={{ margin: 0 }}>
-              <label className="form-label">Gram tertentu</label>
-              <input className="form-input" type="number" min="10" max="5000" value={gram} onChange={e => setGram(e.target.value)} placeholder="10–5000 g" style={{ width: 140 }} />
+      {currentMode === 'manual' && (
+        <div className="card">
+          <div className="card-header"><div><div className="card-title"><Utensils size={18} style={{ verticalAlign: -3 }} /> Beri Pakan Manual</div><div className="card-subtitle">Dari dashboard — setara tombol di panel hardware</div></div></div>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+            <button className="btn btn-primary" disabled={busy || !online || feeding} onClick={() => feedNow(true)}>
+              <Sparkles size={16} /> Feed Adaptif (otomatis dari biomassa)
+            </button>
+            <div className="flex items-end gap-2">
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Gram tertentu</label>
+                <input className="form-input" type="number" min="10" max="5000" value={gram} onChange={e => setGram(e.target.value)} placeholder="10–5000 g" style={{ width: 140 }} />
+              </div>
+              <button className="btn btn-secondary" disabled={busy || !online || feeding} onClick={() => feedNow(false)}>Beri</button>
             </div>
-            <button className="btn btn-secondary" disabled={busy || !online || feeding} onClick={() => feedNow(false)}>Beri</button>
           </div>
+          {feedMsg && <FeedMsgBanner msg={feedMsg} />}
+          {feeding && <div className="text-xs text-muted" style={{ marginTop: 10 }}>Sedang feeding — tunggu selesai sebelum trigger baru.</div>}
         </div>
-        {feedMsg && <FeedMsgBanner msg={feedMsg} />}
-        {feeding && <div className="text-xs text-muted" style={{ marginTop: 10 }}>Sedang feeding — tunggu selesai sebelum trigger baru.</div>}
-      </div>
+      )}
+
+      {/* KONTROL JADWAL / AUTO */}
+      {(currentMode === 'jadwal' || currentMode === 'auto') && (
+        <div style={{ marginBottom: 24 }}>
+          {currentMode === 'auto' && (
+            <div className="alert alert-info" style={{ marginBottom: 16 }}>
+              <Sparkles size={18} />
+              <div><strong>Mode Auto Aktif:</strong> Sistem akan menjalankan pakan sesuai jam jadwal di bawah ini, namun <strong>dosis/gram</strong> akan diabaikan dan dihitung secara cerdas (*adaptif*) berdasarkan sampling biomassa terkini.</div>
+            </div>
+          )}
+          <JadwalPakanPanel device={device} />
+        </div>
+      )}
 
       {/* PENGATURAN SEBARAN (SPINNER) */}
       <div className="card" style={{ marginTop: 24 }}>

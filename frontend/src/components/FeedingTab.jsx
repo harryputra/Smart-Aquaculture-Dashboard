@@ -20,7 +20,6 @@ const ESP_PANELS = [
   { id: 'feedctl',   label: 'Kontrol Pakan',    icon: Sliders },
   { id: 'feeding',   label: 'Pakan Otomatis',   icon: Utensils },
   { id: 'pond',      label: 'Data Kolam',       icon: Utensils }, // Using Utensils for pond data
-  { id: 'schedule',  label: 'Jadwal Pakan',     icon: Clock },
   { id: 'tare',      label: 'Kalibrasi/Tare',   icon: Sliders },
   { id: 'history',   label: 'Riwayat Akhir',    icon: History },
   { id: 'monitor',   label: 'Diagnostik',       icon: Terminal },
@@ -128,7 +127,6 @@ export default function FeedingTab({ pondId }) {
           {espTab === 'feedctl'   && <FeedControlSyncPanel device={feederData.settings} />}
           {espTab === 'feeding'   && <PakanOtomatisPanel device={feederData.settings} />}
           {espTab === 'pond'      && <DataKolamPanel device={feederData.settings} />}
-          {espTab === 'schedule'  && <JadwalPakanPanel device={feederData.settings} />}
           {espTab === 'tare'      && <KalibrasiTarePanel device={feederData.settings} />}
           {espTab === 'history'   && <RiwayatAkhirPanel device={feederData.settings} />}
           {espTab === 'monitor'   && <MqttMonitorPanel deviceId={feederData.settings.device_id} device={feederData.settings} />}

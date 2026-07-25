@@ -11,7 +11,6 @@ import StatusSistemPanel    from '../components/lele/StatusSistemPanel';
 import PakanOtomatisPanel   from '../components/lele/PakanOtomatisPanel';
 import TimbangBiomassaPanel from '../components/lele/TimbangBiomassaPanel';
 import DataKolamPanel       from '../components/lele/DataKolamPanel';
-import JadwalPakanPanel     from '../components/lele/JadwalPakanPanel';
 import KalibrasiTarePanel   from '../components/lele/KalibrasiTarePanel';
 import RiwayatAkhirPanel    from '../components/lele/RiwayatAkhirPanel';
 import PengaturanPanel      from '../components/lele/PengaturanPanel';
@@ -25,7 +24,6 @@ const PANELS = [
   { id: 'feeding',   label: 'Pakan Otomatis',   icon: Utensils },
   { id: 'biomass',   label: 'Timbang Biomassa', icon: Scale },
   { id: 'pond',      label: 'Data Kolam',       icon: Database },
-  { id: 'schedule',  label: 'Jadwal Pakan',     icon: Clock },
   { id: 'tare',      label: 'Kalibrasi/Tare',   icon: Sliders },
   { id: 'history',   label: 'Riwayat Akhir',    icon: History },
   { id: 'monitor',   label: 'Diagnostik',       icon: Terminal },
@@ -211,7 +209,6 @@ export default function LeleFeeder() {
                   {tab === 'feeding'   && <PakanOtomatisPanel device={device} />}
                   {tab === 'biomass'   && <TimbangBiomassaPanel device={device} />}
                   {tab === 'pond'      && <DataKolamPanel device={device} />}
-                  {tab === 'schedule'  && <JadwalPakanPanel device={device} />}
                   {tab === 'tare'      && <KalibrasiTarePanel device={device} />}
                   {tab === 'history'   && <RiwayatAkhirPanel device={device} />}
                   {tab === 'monitor'   && <MqttMonitorPanel deviceId={device.device_id} device={device} />}
