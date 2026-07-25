@@ -704,13 +704,12 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
       const dailyFeedG = (fishCount * avgG * rate) / 100;              // gram/hari
       const perScheduleG = perDay > 0 ? dailyFeedG / perDay : 0;
       const settings = {
-        device_id: dev.device_id, name: dev.name, is_online: dev.is_online,
+        ...dev,
         feed_mode: live.feed_mode || (dev.auto_feed_enabled ? 'jadwal' : 'manual'),
         feeding_rate_percent: rate, feeding_per_day: perDay,
         avg_fish_g: avgG, fish_count: fishCount,
         next_schedule_hhmm: dev.next_schedule_hhmm || live.next_schedule_hhmm || null,
         daily_feed_g: Math.round(dailyFeedG), per_schedule_g: Math.round(perScheduleG),
-        last_feed_time: dev.last_feed_time, sample_ready: dev.sample_ready,
         live_data: live,
       };
       const sessions = (await pool.query(
