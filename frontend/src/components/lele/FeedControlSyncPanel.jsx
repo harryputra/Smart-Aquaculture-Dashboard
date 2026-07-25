@@ -20,6 +20,7 @@ export default function FeedControlSyncPanel({ device }) {
   const online = device.is_online;
 
   const [busy, setBusy] = useState(false);
+  const [optimisticMode, setOptimisticMode] = useState(null);
   const [gram, setGram] = useState('');
   const [progress, setProgress] = useState(null);
   const [feedMsg, setFeedMsg] = useState(null);   // { kind:'sending'|'ok'|'fail'|'timeout', text }
@@ -49,7 +50,16 @@ export default function FeedControlSyncPanel({ device }) {
   async function changeMode(mode) {
     if (mode === currentMode || busy) return;
     setBusy(true);
-    try { await setFeedMode(deviceId, mode); } catch (e) { alert(e.message); } finally { setTimeout(() => setBusy(false), 600); }
+    setOptimisticMode(mode);
+    try { 
+      await setFeedMode(deviceId, mode); 
+      setTimeout(() => setOptimisticMode(null), 2000); 
+    } catch (e) { 
+      alert(e.message); 
+      setOptimisticMode(null); 
+    } finally { 
+      setTimeout(() => setBusy(false), 600); 
+    }
   }
   // Tunggu ACK BARU dari device (beda dari baseline) untuk command tertentu, maks ~7 dtk.
   async function waitForAck(expectedCmd, baselineTs) {
@@ -130,16 +140,22 @@ export default function FeedControlSyncPanel({ device }) {
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 12 }}>
           {MODES.map(m => {
-            const Icon = m.icon; const active = currentMode === m.id;
+            const Icon = m.icon;
+            const active = (optimisticMode || currentMode) === m.id;
+            const isTarget = optimisticMode === m.id;
             return (
               <button key={m.id} onClick={() => changeMode(m.id)} disabled={busy || !online}
                 style={{
                   textAlign: 'left', padding: 14, borderRadius: 12, cursor: online ? 'pointer' : 'not-allowed',
                   border: '2px solid ' + (active ? 'var(--accent-primary)' : 'var(--border-primary)'),
                   background: active ? 'var(--accent-light)' : 'var(--bg-secondary)',
+                  opacity: (busy && !isTarget) ? 0.6 : 1,
+                  position: 'relative',
                 }}>
                 <div className="flex items-center gap-2" style={{ fontWeight: 700, color: active ? 'var(--accent-primary)' : 'inherit' }}>
-                  <Icon size={18} /> {m.label} {active && <CheckCircle size={15} style={{ marginLeft: 'auto', color: 'var(--success)' }} />}
+                  <Icon size={18} /> {m.label} 
+                  {active && !isTarget && <CheckCircle size={15} style={{ marginLeft: 'auto', color: 'var(--success)' }} />}
+                  {isTarget && busy && <Loader size={15} className="animate-spin" style={{ marginLeft: 'auto', color: 'var(--accent-primary)' }} />}
                 </div>
                 <div className="text-xs text-muted" style={{ marginTop: 4 }}>{m.desc}</div>
               </button>
