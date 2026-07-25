@@ -1,11 +1,31 @@
 import { useEffect, useState } from 'react';
-import { Plus, Utensils, Trash2, X } from 'lucide-react';
+import { Plus, Utensils, Trash2, X, Activity, Sliders, Clock, History, Terminal, Settings as SettingsIcon } from 'lucide-react';
 import {
   getFeedingSchedules, createFeedingSchedule, deleteFeedingSchedule,
   getFeedingLogs, recordFeeding, getPondFeeder
 } from '../services/api';
 import FeederDetail from './FeederDetail';
 import JadwalPakanPanel from './lele/JadwalPakanPanel';
+import StatusSistemPanel from './lele/StatusSistemPanel';
+import PakanOtomatisPanel from './lele/PakanOtomatisPanel';
+import KalibrasiTarePanel from './lele/KalibrasiTarePanel';
+import RiwayatAkhirPanel from './lele/RiwayatAkhirPanel';
+import PengaturanPanel from './lele/PengaturanPanel';
+import FeedControlSyncPanel from './lele/FeedControlSyncPanel';
+import MqttMonitorPanel from './lele/MqttMonitorPanel';
+import DataKolamPanel from './lele/DataKolamPanel';
+
+const ESP_PANELS = [
+  { id: 'status',    label: 'Status Sistem',    icon: Activity },
+  { id: 'feedctl',   label: 'Kontrol Pakan',    icon: Sliders },
+  { id: 'feeding',   label: 'Pakan Otomatis',   icon: Utensils },
+  { id: 'pond',      label: 'Data Kolam',       icon: Utensils }, // Using Utensils for pond data
+  { id: 'schedule',  label: 'Jadwal Pakan',     icon: Clock },
+  { id: 'tare',      label: 'Kalibrasi/Tare',   icon: Sliders },
+  { id: 'history',   label: 'Riwayat Akhir',    icon: History },
+  { id: 'monitor',   label: 'Diagnostik',       icon: Terminal },
+  { id: 'settings',  label: 'Pengaturan',       icon: SettingsIcon },
+];
 
 const DAYS = [
   { id: 1, label: 'S', name: 'Sen' }, { id: 2, label: 'S', name: 'Sel' },
@@ -25,6 +45,7 @@ export default function FeedingTab({ pondId }) {
   });
   const [logForm, setLogForm] = useState({ feed_amount_kg: 2.5, feed_type: 'Pelet', note: '' });
   const [feederData, setFeederData] = useState(null);
+  const [espTab, setEspTab] = useState('status');
 
   async function load() {
     try {
@@ -75,11 +96,32 @@ export default function FeedingTab({ pondId }) {
 
   return (
     <>
-      <FeederDetail pondId={pondId} />
+      {(!feederData || !feederData.has_device) && <FeederDetail pondId={pondId} />}
 
       {feederData?.has_device && feederData?.settings ? (
-        <div style={{ marginTop: 24 }}>
-          <JadwalPakanPanel device={feederData.settings} />
+        <div style={{ marginTop: 12 }}>
+          <div className="tabs" style={{ marginBottom: 20, flexWrap: 'wrap' }}>
+            {ESP_PANELS.map(p => {
+              const Icon = p.icon;
+              return (
+                <button key={p.id}
+                  className={'tab' + (espTab === p.id ? ' active' : '')}
+                  onClick={() => setEspTab(p.id)}>
+                  <Icon size={16} /> {p.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {espTab === 'status'    && <StatusSistemPanel device={feederData.settings} onAssign={() => {}} />}
+          {espTab === 'feedctl'   && <FeedControlSyncPanel device={feederData.settings} />}
+          {espTab === 'feeding'   && <PakanOtomatisPanel device={feederData.settings} />}
+          {espTab === 'pond'      && <DataKolamPanel device={feederData.settings} />}
+          {espTab === 'schedule'  && <JadwalPakanPanel device={feederData.settings} />}
+          {espTab === 'tare'      && <KalibrasiTarePanel device={feederData.settings} />}
+          {espTab === 'history'   && <RiwayatAkhirPanel device={feederData.settings} />}
+          {espTab === 'monitor'   && <MqttMonitorPanel deviceId={feederData.settings.device_id} device={feederData.settings} />}
+          {espTab === 'settings'  && <PengaturanPanel device={feederData.settings} onAssign={() => {}} />}
         </div>
       ) : (
         <>
