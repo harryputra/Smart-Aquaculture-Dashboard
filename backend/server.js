@@ -1100,6 +1100,9 @@ registerWaHandlers({ app, pool });
 const { registerDbExplorer } = require('./db-explorer');
 registerDbExplorer({ app, pool });
 
+const { registerCctvHandlers } = require('./cctv');
+registerCctvHandlers({ app, pool });
+
 // Pengelolaan siklus budidaya (tebar→panen) — lihat docs/RENCANA-PENGELOLAAN-KOLAM.md
 const { registerCycleHandlers } = require('./cycle-management');
 registerCycleHandlers({ app, pool });

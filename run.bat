@@ -127,6 +127,8 @@ call :runsql migration-aerator.sql
 call :runsql migration-feedlevel.sql
 call :runsql migration-wa-providers.sql
 call :runsql migration-wa-providers2.sql
+call :runsql migration-partial-harvest.sql
+call :runsql migration-cctv.sql
 echo [..] Restart backend (seed admin/demo setelah tabel ada)...
 %DC% restart backend >nul 2>&1
 echo [OK] Migrasi selesai.

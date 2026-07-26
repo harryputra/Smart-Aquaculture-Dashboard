@@ -3,7 +3,7 @@ import { Routes, Route, NavLink, Link, useLocation } from 'react-router-dom';
 import {
   Home, Fish, Activity, BarChart3, Bell, Waves,
   Skull, Utensils, Settings, LayoutGrid, Cpu, Menu, X, Radio, Wrench, Plug, LogOut,
-  Users as UsersIcon, ArrowUpCircle, MessageCircle, Database as DatabaseIcon,
+  Users as UsersIcon, ArrowUpCircle, MessageCircle, Database as DatabaseIcon, Video,
 } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import Farms from './pages/Farms';
@@ -21,6 +21,7 @@ import WaterDevices from './pages/WaterDevices';
 import WhatsApp from './pages/WhatsApp';
 import ComparePonds from './pages/ComparePonds';
 import Database from './pages/Database';
+import Cctv from './pages/Cctv';
 import Login from './pages/Login';
 import QuickLogin from './pages/QuickLogin';
 import Users from './pages/Users';
@@ -120,6 +121,9 @@ function Shell() {
           <NavLink to="/water-devices" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
             <Waves size={18} /> <span>Perangkat Air</span>
           </NavLink>
+          <NavLink to="/cctv" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
+            <Video size={18} /> <span>CCTV</span>
+          </NavLink>
           <NavLink to="/devices" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
             <Plug size={18} /> <span>Perangkat</span>
           </NavLink>
@@ -207,6 +211,7 @@ function Shell() {
 
           <Route element={<RequireRole roles={['superadmin']} />}>
             <Route path="/database" element={<Database />} />
+          <Route path="/cctv" element={<Cctv />} />
           </Route>
 
           <Route path="*" element={

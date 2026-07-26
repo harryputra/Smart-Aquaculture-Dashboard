@@ -45,6 +45,14 @@ export const deleteWaRecipient = (id) => req(`/wa/recipients/${id}`, { method: '
 export const testWaRecipient = (id) => req(`/wa/recipients/${id}/test`, { method: 'POST' });
 export const getWaLog = () => req('/wa/log');
 
+// CCTV (peluncur portal + kredensial per org + katalog kamera)
+export const getCctvConfig = (orgId) => req('/cctv/config' + (orgId ? `?org_id=${encodeURIComponent(orgId)}` : ''));
+export const setCctvConfig = (data) => req('/cctv/config', { method: 'PUT', body: data });
+export const getCctvCameras = (orgId) => req('/cctv/cameras' + (orgId ? `?org_id=${encodeURIComponent(orgId)}` : ''));
+export const createCctvCamera = (data) => req('/cctv/cameras', { method: 'POST', body: data });
+export const updateCctvCamera = (id, data) => req(`/cctv/cameras/${id}`, { method: 'PUT', body: data });
+export const deleteCctvCamera = (id) => req(`/cctv/cameras/${id}`, { method: 'DELETE' });
+
 // Quick-Login
 export const getQuickLoginPublic = (token) =>
   req('/quick-login/public' + (token ? `?token=${encodeURIComponent(token)}` : ''));
