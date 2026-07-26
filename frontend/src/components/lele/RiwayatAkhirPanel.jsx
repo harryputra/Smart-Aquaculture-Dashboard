@@ -71,7 +71,7 @@ export default function RiwayatAkhirPanel({ device }) {
               <>
                 <div className="text-xs" style={{ marginTop: 6 }}>Target: <strong>{parseFloat(device.last_feed_target_g).toFixed(0)}g</strong> | Aktual: <strong>{parseFloat(device.last_feed_actual_g).toFixed(0)}g</strong></div>
                 <div className="text-xs">Batch: {device.last_feed_batch_count}</div>
-                <div className="text-xs text-muted">{device.last_feed_time}</div>
+                <div className="text-xs text-muted">{new Date(device.last_feed_time).toLocaleString('id-ID')}</div>
               </>
             )}
           </div>
@@ -105,7 +105,7 @@ export default function RiwayatAkhirPanel({ device }) {
             <div style={{ fontSize: 13, fontWeight: 700 }}>{device.last_error_code || 'NONE'}</div>
             <div className="text-xs" style={{ marginTop: 6 }}>{device.last_error_msg || 'Tidak ada error'}</div>
             {device.last_error_time && device.last_error_time !== '-' && (
-              <div className="text-xs text-muted">{device.last_error_time}</div>
+              <div className="text-xs text-muted">{new Date(device.last_error_time).toLocaleString('id-ID')}</div>
             )}
           </div>
         </div>
