@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const multer = require('multer');
+const { requireRole, requireDeviceAccess } = require('./authorize');
 
 function registerLeleOtaHandlers({ app, pool, mqttClient }) {
   const DIR = process.env.FIRMWARE_DIR || path.join(__dirname, 'firmware');
@@ -39,13 +40,6 @@ function registerLeleOtaHandlers({ app, pool, mqttClient }) {
     return manifest;
   }
 
-  // Hanya Pemilik/Superadmin boleh kelola firmware & memicu OTA.
-  const requireOwner = (req, res, next) => {
-    const role = req.auth?.role;
-    if (role === 'pemilik' || role === 'superadmin') return next();
-    return res.status(403).json({ error: 'Hanya Pemilik/Super Admin yang boleh kelola firmware/OTA.' });
-  };
-
   // ---------------- Admin: katalog firmware ----------------
   app.get('/api/lele/firmware', async (req, res) => {
     try {
@@ -56,7 +50,7 @@ function registerLeleOtaHandlers({ app, pool, mqttClient }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  app.post('/api/lele/firmware', requireOwner, upload.single('file'), async (req, res) => {
+  app.post('/api/lele/firmware', requireRole('pemilik', 'superadmin'), upload.single('file'), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ error: 'File firmware (.bin) wajib.' });
       const model = String(req.body.model || 'pakan_lele').slice(0, 40);
@@ -78,7 +72,7 @@ function registerLeleOtaHandlers({ app, pool, mqttClient }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  app.put('/api/lele/firmware/:id/latest', requireOwner, async (req, res) => {
+  app.put('/api/lele/firmware/:id/latest', requireRole('pemilik', 'superadmin'), async (req, res) => {
     try {
       const fw = (await pool.query(`SELECT model FROM lele_firmware WHERE id = $1`, [req.params.id])).rows[0];
       if (!fw) return res.status(404).json({ error: 'Tidak ditemukan.' });
@@ -88,7 +82,7 @@ function registerLeleOtaHandlers({ app, pool, mqttClient }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  app.delete('/api/lele/firmware/:id', requireOwner, async (req, res) => {
+  app.delete('/api/lele/firmware/:id', requireRole('pemilik', 'superadmin'), async (req, res) => {
     try {
       const r = await pool.query(`DELETE FROM lele_firmware WHERE id = $1 RETURNING filename`, [req.params.id]);
       if (r.rows[0]) { try { fs.unlinkSync(path.join(DIR, r.rows[0].filename)); } catch (_) {} }
@@ -97,7 +91,7 @@ function registerLeleOtaHandlers({ app, pool, mqttClient }) {
   });
 
   // ---------------- Admin: trigger OTA ----------------
-  app.post('/api/lele/devices/:deviceId/ota', requireOwner, async (req, res) => {
+  app.post('/api/lele/devices/:deviceId/ota', requireRole('pemilik', 'superadmin'), requireDeviceAccess('deviceId'), async (req, res) => {
     try {
       if (!PUBLIC_BASE) return res.status(500).json({ error: 'OTA_PUBLIC_BASE belum diset di server.' });
       const fw = await fwById(req.body?.firmware_id);
@@ -108,7 +102,7 @@ function registerLeleOtaHandlers({ app, pool, mqttClient }) {
   });
 
   // ---------------- Rollout canary + audit ----------------
-  app.post('/api/lele/ota/rollout', requireOwner, async (req, res) => {
+  app.post('/api/lele/ota/rollout', requireRole('pemilik', 'superadmin'), async (req, res) => {
     try {
       if (!PUBLIC_BASE) return res.status(500).json({ error: 'OTA_PUBLIC_BASE belum diset di server.' });
       const ids = Array.isArray(req.body?.device_ids) ? req.body.device_ids.filter(Boolean) : [];
@@ -134,7 +128,7 @@ function registerLeleOtaHandlers({ app, pool, mqttClient }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  app.post('/api/lele/ota/rollout/:id/abort', requireOwner, async (req, res) => {
+  app.post('/api/lele/ota/rollout/:id/abort', requireRole('pemilik', 'superadmin'), async (req, res) => {
     try {
       await pool.query(`UPDATE lele_ota_rollout SET status='aborted', updated_at=NOW() WHERE id=$1 AND status='canary'`, [req.params.id]);
       res.json({ success: true });

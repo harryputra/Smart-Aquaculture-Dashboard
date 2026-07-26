@@ -3,6 +3,8 @@
 // Sesuai firmware esp32_pakan_lele_v3_2.ino
 // ============================
 
+const { requireRole, requirePondAccess, requireDeviceAccess, orgFilter } = require('./authorize');
+
 function registerLeleHandlers({ app, pool, mqttClient }) {
   mqttClient.subscribe('lele/device/status');
   mqttClient.subscribe('lele/biomass/sample');
@@ -363,11 +365,17 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
   // ============================
   app.get('/api/lele/devices', async (req, res) => {
     try {
+      const org = req.auth?.org || null;
+      const params = [];
+      let where = '';
+      if (org) { params.push(org); where = `WHERE f.org_id = $1`; }
       const r = await pool.query(`
         SELECT d.*, p.name as pond_name, p.fish_type
         FROM lele_devices d
         LEFT JOIN ponds p ON d.pond_id = p.pond_id
-        ORDER BY d.created_at DESC`);
+        LEFT JOIN farms f ON p.farm_id = f.farm_id
+        ${where}
+        ORDER BY d.created_at DESC`, params);
       const rows = r.rows.map(d => ({
         ...d,
         live_data: liveDataCache[d.device_id] || null,
@@ -376,7 +384,7 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  app.get('/api/lele/devices/:deviceId', async (req, res) => {
+  app.get('/api/lele/devices/:deviceId', requireDeviceAccess('deviceId'), async (req, res) => {
     try {
       const r = await pool.query(`
         SELECT d.*, p.name as pond_name, p.fish_type
@@ -388,7 +396,7 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  app.put('/api/lele/devices/:deviceId/assign', async (req, res) => {
+  app.put('/api/lele/devices/:deviceId/assign', requireRole('pemilik', 'superadmin'), requireDeviceAccess('deviceId'), async (req, res) => {
     try {
       const { pond_id, name } = req.body;
       const r = await pool.query(
@@ -403,7 +411,7 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
   // MONITOR / DIAGNOSTIK — lalu lintas MQTT 2 arah
   // ============================
   // Traffic per device. afterId>0 = incremental (live); afterId=0 = N terakhir.
-  app.get('/api/lele/devices/:deviceId/traffic', async (req, res) => {
+  app.get('/api/lele/devices/:deviceId/traffic', requireDeviceAccess('deviceId'), async (req, res) => {
     try {
       const afterId = parseInt(req.query.afterId) || 0;
       const limit = Math.min(parseInt(req.query.limit) || 120, 500);
@@ -445,7 +453,7 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
   });
 
   // Test koneksi end-to-end: kirim ping → device balas ACK (firmware: "pong").
-  app.post('/api/lele/devices/:deviceId/ping', async (req, res) => {
+  app.post('/api/lele/devices/:deviceId/ping', requireDeviceAccess('deviceId'), async (req, res) => {
     try {
       sendCommand(req.params.deviceId, 'ping');
       res.json({ success: true, sentAt: Date.now() });
@@ -453,14 +461,14 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
   });
 
   // Progress penimbangan pakan LIVE (in-memory). null bila tak sedang feeding (>5s basi).
-  app.get('/api/lele/devices/:deviceId/feed-progress', (req, res) => {
+  app.get('/api/lele/devices/:deviceId/feed-progress', requireDeviceAccess('deviceId'), (req, res) => {
     const p = feedProgressCache[req.params.deviceId] || null;
     if (p && Date.now() - p.received_at > 5000) return res.json(null);
     res.json(p);
   });
 
   // Set mode pakan: manual | jadwal | auto (sinkron ke hardware via MQTT).
-  app.post('/api/lele/devices/:deviceId/control/feed-mode', (req, res) => {
+  app.post('/api/lele/devices/:deviceId/control/feed-mode', requireDeviceAccess('deviceId'), (req, res) => {
     const mode = String(req.body?.mode || '').toLowerCase();
     if (!['manual', 'jadwal', 'auto'].includes(mode)) {
       return res.status(400).json({ error: 'mode harus manual|jadwal|auto' });
@@ -470,7 +478,7 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
   });
 
   // Pengaturan spinner/sebaran: kecepatan tinggi/rendah + arah (0=bolak-balik,1=kanan,2=kiri).
-  app.post('/api/lele/devices/:deviceId/control/spinner', (req, res) => {
+  app.post('/api/lele/devices/:deviceId/control/spinner', requireDeviceAccess('deviceId'), (req, res) => {
     const cfg = {};
     const b = req.body || {};
     const clamp = (v) => Math.max(120, Math.min(255, parseInt(v)));
@@ -483,7 +491,7 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
   });
 
   // Mode buka trapdoor: instan vs bertahap (metered) + ambang anti-macet (ms).
-  app.post('/api/lele/devices/:deviceId/control/servo', (req, res) => {
+  app.post('/api/lele/devices/:deviceId/control/servo', requireDeviceAccess('deviceId'), (req, res) => {
     const cfg = {};
     const b = req.body || {};
     if (b.mode != null) { const m = parseInt(b.mode); if (m === 0 || m === 1) cfg.servo_open_mode = m; }
@@ -494,7 +502,7 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
   });
 
   // Test spinner: putar X detik tanpa pakan. Opsional pwm (120-255) & dir (1=kanan,2=kiri).
-  app.post('/api/lele/devices/:deviceId/control/test-spread', (req, res) => {
+  app.post('/api/lele/devices/:deviceId/control/test-spread', requireDeviceAccess('deviceId'), (req, res) => {
     const b = req.body || {};
     const payload = { seconds: Math.max(1, Math.min(15, parseInt(b.seconds) || 5)) };
     if (b.pwm != null) payload.pwm = Math.max(120, Math.min(255, parseInt(b.pwm)));
@@ -504,14 +512,14 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
   });
 
   // Test trapdoor servo: action = open | close | sweep.
-  app.post('/api/lele/devices/:deviceId/control/test-servo', (req, res) => {
+  app.post('/api/lele/devices/:deviceId/control/test-servo', requireDeviceAccess('deviceId'), (req, res) => {
     const action = ['open', 'close', 'sweep'].includes(req.body?.action) ? req.body.action : 'sweep';
     sendCommand(req.params.deviceId, 'test_servo', { action });
     res.json({ success: true, action });
   });
 
   // Test auger/stepper: jog maju/mundur beberapa detik.
-  app.post('/api/lele/devices/:deviceId/control/test-auger', (req, res) => {
+  app.post('/api/lele/devices/:deviceId/control/test-auger', requireDeviceAccess('deviceId'), (req, res) => {
     const seconds = Math.max(1, Math.min(8, parseInt(req.body?.seconds) || 3));
     const dir = req.body?.dir === 'mundur' ? 'mundur' : 'maju';
     sendCommand(req.params.deviceId, 'test_auger', { seconds, dir });
@@ -519,13 +527,13 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
   });
 
   // STOP DARURAT: hentikan semua aktuator.
-  app.post('/api/lele/devices/:deviceId/control/stop', (req, res) => {
+  app.post('/api/lele/devices/:deviceId/control/stop', requireDeviceAccess('deviceId'), (req, res) => {
     sendCommand(req.params.deviceId, 'stop_all');
     res.json({ success: true });
   });
 
   // ---- Laporan commissioning (hasil uji hardware) ----
-  app.get('/api/lele/devices/:deviceId/commissioning', async (req, res) => {
+  app.get('/api/lele/devices/:deviceId/commissioning', requireRole('pemilik', 'superadmin'), requireDeviceAccess('deviceId'), async (req, res) => {
     try {
       const r = await pool.query(
         `SELECT DISTINCT ON (test_key) test_key, result, note, tested_at
@@ -534,7 +542,7 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
       res.json(r.rows);
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
-  app.post('/api/lele/devices/:deviceId/commissioning', async (req, res) => {
+  app.post('/api/lele/devices/:deviceId/commissioning', requireRole('pemilik', 'superadmin'), requireDeviceAccess('deviceId'), async (req, res) => {
     try {
       const { test_key, result, note = null } = req.body || {};
       if (!test_key || !['pass', 'fail'].includes(result)) return res.status(400).json({ error: 'test_key & result (pass|fail) wajib.' });
@@ -548,14 +556,14 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
   // ============================
   // REMOTE CONTROL
   // ============================
-  app.post('/api/lele/devices/:deviceId/control/manual-feed', async (req, res) => {
+  app.post('/api/lele/devices/:deviceId/control/manual-feed', requireDeviceAccess('deviceId'), async (req, res) => {
     try {
       sendCommand(req.params.deviceId, 'manual_feed_adaptive');
       res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  app.post('/api/lele/devices/:deviceId/control/feed-gram', async (req, res) => {
+  app.post('/api/lele/devices/:deviceId/control/feed-gram', requireDeviceAccess('deviceId'), async (req, res) => {
     try {
       const { target_g } = req.body;
       if (!target_g || target_g < 10 || target_g > 5000) {
@@ -566,7 +574,7 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  app.post('/api/lele/devices/:deviceId/control/auto-feed', async (req, res) => {
+  app.post('/api/lele/devices/:deviceId/control/auto-feed', requireDeviceAccess('deviceId'), async (req, res) => {
     try {
       const { enabled } = req.body;
       sendCommand(req.params.deviceId, 'set_auto_feed', { enabled });
@@ -574,7 +582,7 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  app.post('/api/lele/devices/:deviceId/control/tare', async (req, res) => {
+  app.post('/api/lele/devices/:deviceId/control/tare', requireDeviceAccess('deviceId'), async (req, res) => {
     try {
       const { scale_type } = req.body;
       sendCommand(req.params.deviceId, 'tare', { scale_type });
@@ -586,22 +594,22 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  app.post('/api/lele/devices/:deviceId/control/reset-samples', async (req, res) => {
+  app.post('/api/lele/devices/:deviceId/control/reset-samples', requireDeviceAccess('deviceId'), async (req, res) => {
     try { sendCommand(req.params.deviceId, 'reset_samples'); res.json({ success: true }); }
     catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  app.post('/api/lele/devices/:deviceId/control/start-sampling', async (req, res) => {
+  app.post('/api/lele/devices/:deviceId/control/start-sampling', requireDeviceAccess('deviceId'), async (req, res) => {
     try { sendCommand(req.params.deviceId, 'start_sampling'); res.json({ success: true }); }
     catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  app.post('/api/lele/devices/:deviceId/control/auto-gen-schedule', async (req, res) => {
+  app.post('/api/lele/devices/:deviceId/control/auto-gen-schedule', requireDeviceAccess('deviceId'), async (req, res) => {
     try { sendCommand(req.params.deviceId, 'auto_gen_schedule'); res.json({ success: true }); }
     catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  app.post('/api/lele/devices/:deviceId/control/valve', async (req, res) => {
+  app.post('/api/lele/devices/:deviceId/control/valve', requireDeviceAccess('deviceId'), async (req, res) => {
     try {
       const { action } = req.body;
       sendCommand(req.params.deviceId, action === 'open' ? 'open_valve' : 'close_valve');
@@ -609,7 +617,7 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  app.post('/api/lele/devices/:deviceId/control/button', async (req, res) => {
+  app.post('/api/lele/devices/:deviceId/control/button', requireDeviceAccess('deviceId'), async (req, res) => {
     try {
       const { button } = req.body;
       if (!['up', 'down', 'ok', 'back'].includes(button)) {
@@ -621,7 +629,7 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
   });
 
   // Update config via MQTT (langsung ke ESP32)
-  app.put('/api/lele/devices/:deviceId/config-mqtt', async (req, res) => {
+  app.put('/api/lele/devices/:deviceId/config-mqtt', requireRole('pemilik', 'superadmin'), requireDeviceAccess('deviceId'), async (req, res) => {
     try {
       const { fish_count, feeding_per_day, target_sample_count, avg_fish_g } = req.body;
       const config = {};
@@ -641,7 +649,7 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
   });
 
   // Update jadwal individual
-  app.put('/api/lele/devices/:deviceId/schedule/:idx', async (req, res) => {
+  app.put('/api/lele/devices/:deviceId/schedule/:idx', requireDeviceAccess('deviceId'), async (req, res) => {
     try {
       const idx = parseInt(req.params.idx);
       const { hour, minute, enabled } = req.body;
@@ -654,11 +662,11 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  app.get('/api/lele/devices/:deviceId/last-ack', async (req, res) => {
+  app.get('/api/lele/devices/:deviceId/last-ack', requireDeviceAccess('deviceId'), async (req, res) => {
     res.json(ackCache[req.params.deviceId] || null);
   });
 
-  app.get('/api/lele/devices/:deviceId/schedules-synced', async (req, res) => {
+  app.get('/api/lele/devices/:deviceId/schedules-synced', requireDeviceAccess('deviceId'), async (req, res) => {
     try {
       const r = await pool.query(
         `SELECT * FROM lele_device_schedules WHERE device_id = $1 ORDER BY schedule_index`,
@@ -671,7 +679,7 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
   // ============================
   // DATA QUERIES
   // ============================
-  app.get('/api/lele/devices/:deviceId/biomass-samples', async (req, res) => {
+  app.get('/api/lele/devices/:deviceId/biomass-samples', requireDeviceAccess('deviceId'), async (req, res) => {
     try {
       const r = await pool.query(
         `SELECT * FROM lele_biomass_samples WHERE device_id = $1 ORDER BY sampled_at DESC LIMIT 100`,
@@ -681,7 +689,7 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  app.get('/api/lele/devices/:deviceId/biomass-summary', async (req, res) => {
+  app.get('/api/lele/devices/:deviceId/biomass-summary', requireDeviceAccess('deviceId'), async (req, res) => {
     try {
       const r = await pool.query(
         `SELECT * FROM lele_biomass_summary WHERE device_id = $1 ORDER BY summarized_at DESC LIMIT 20`,
@@ -692,7 +700,7 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
   });
 
   // Detail feeder + gramasi + riwayat sesi untuk SATU kolam (tab Pakan).
-  app.get('/api/ponds/:pondId/feeder', async (req, res) => {
+  app.get('/api/ponds/:pondId/feeder', requirePondAccess('pondId'), async (req, res) => {
     try {
       const dev = (await pool.query(`SELECT * FROM lele_devices WHERE pond_id=$1 LIMIT 1`, [req.params.pondId])).rows[0];
       if (!dev) return res.json({ has_device: false });
@@ -720,7 +728,7 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  app.get('/api/lele/devices/:deviceId/growth', async (req, res) => {
+  app.get('/api/lele/devices/:deviceId/growth', requireDeviceAccess('deviceId'), async (req, res) => {
     try {
       const r = await pool.query(
         `SELECT summarized_at as recorded_at, average_fish_weight_g, estimated_biomass_kg, fish_count
@@ -731,7 +739,7 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  app.get('/api/lele/devices/:deviceId/sessions', async (req, res) => {
+  app.get('/api/lele/devices/:deviceId/sessions', requireDeviceAccess('deviceId'), async (req, res) => {
     try {
       const r = await pool.query(
         `SELECT s.*,
@@ -744,7 +752,7 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  app.get('/api/lele/devices/:deviceId/errors', async (req, res) => {
+  app.get('/api/lele/devices/:deviceId/errors', requireDeviceAccess('deviceId'), async (req, res) => {
     try {
       const r = await pool.query(
         `SELECT * FROM lele_errors WHERE device_id = $1 ORDER BY occurred_at DESC LIMIT 50`,
@@ -754,7 +762,7 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  app.get('/api/lele/devices/:deviceId/tare-history', async (req, res) => {
+  app.get('/api/lele/devices/:deviceId/tare-history', requireDeviceAccess('deviceId'), async (req, res) => {
     try {
       const r = await pool.query(
         `SELECT * FROM lele_tare_history WHERE device_id = $1 ORDER BY occurred_at DESC LIMIT 20`,

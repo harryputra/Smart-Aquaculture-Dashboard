@@ -24,6 +24,7 @@ import Database from './pages/Database';
 import Login from './pages/Login';
 import QuickLogin from './pages/QuickLogin';
 import Users from './pages/Users';
+import RequireRole from './components/RequireRole';
 import NotificationToasts from './components/NotificationToasts';
 import { getUnreadCount } from './services/api';
 import { useAuth, useCan, ROLE_LABEL } from './context/AuthContext';
@@ -193,14 +194,29 @@ function Shell() {
           <Route path="/compare" element={<ComparePonds />} />
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/lele-feeder" element={<LeleFeeder />} />
-          <Route path="/water-devices" element={<WaterDevices />} />
-          <Route path="/mqtt-monitor" element={<MqttMonitor />} />
-          <Route path="/hardware-test" element={<HardwareTest />} />
-          <Route path="/devices" element={<Devices />} />
-          <Route path="/firmware" element={<Firmware />} />
-          <Route path="/users" element={<Users />} />
-          <Route path="/whatsapp" element={<WhatsApp />} />
-          <Route path="/database" element={<Database />} />
+
+          <Route element={<RequireRole roles={['superadmin', 'pemilik']} />}>
+            <Route path="/water-devices" element={<WaterDevices />} />
+            <Route path="/mqtt-monitor" element={<MqttMonitor />} />
+            <Route path="/hardware-test" element={<HardwareTest />} />
+            <Route path="/devices" element={<Devices />} />
+            <Route path="/firmware" element={<Firmware />} />
+            <Route path="/whatsapp" element={<WhatsApp />} />
+            <Route path="/users" element={<Users />} />
+          </Route>
+
+          <Route element={<RequireRole roles={['superadmin']} />}>
+            <Route path="/database" element={<Database />} />
+          </Route>
+
+          <Route path="*" element={
+            <div className="card" style={{ textAlign: 'center', padding: '50px 20px', marginTop: 40 }}>
+              <div style={{ fontSize: 48, marginBottom: 15 }}>404</div>
+              <h3>Halaman Tidak Ditemukan</h3>
+              <p style={{ color: 'var(--text-secondary)' }}>Mungkin Anda tidak memiliki akses ke halaman ini.</p>
+              <Link to="/" className="btn btn-primary" style={{ marginTop: 20 }}>Ke Beranda</Link>
+            </div>
+          } />
         </Routes>
       </main>
     </div>

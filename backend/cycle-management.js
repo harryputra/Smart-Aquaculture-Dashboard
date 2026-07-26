@@ -3,6 +3,8 @@
 // Endpoint: /api/ponds/:pondId/cycle (aktif), POST (mulai), /cycle/harvest
 // (panen+hitung SR/FCR/profit/ROI), /cycles (riwayat).
 // ======================================================================
+const { requireRole, requirePondAccess, requireDeviceAccess, orgFilter } = require('./authorize');
+
 const r2 = (n) => (n == null ? null : Math.round(n * 100) / 100);
 const r3 = (n) => (n == null ? null : Math.round(n * 1000) / 1000);
 
@@ -80,7 +82,7 @@ function registerCycleHandlers({ app, pool }) {
   }
 
   // ---- Siklus aktif (+ metrik) ----
-  app.get('/api/ponds/:pondId/cycle', async (req, res) => {
+  app.get('/api/ponds/:pondId/cycle', requirePondAccess('pondId'), async (req, res) => {
     try {
       const r = await pool.query(
         `SELECT * FROM pond_cycles WHERE pond_id=$1 AND status='active' ORDER BY start_date DESC LIMIT 1`,
@@ -118,7 +120,7 @@ function registerCycleHandlers({ app, pool }) {
   });
 
   // ---- Ringkasan menyeluruh 1 kolam (untuk panel atas Detail Kolam) ----
-  app.get('/api/ponds/:pondId/overview', async (req, res) => {
+  app.get('/api/ponds/:pondId/overview', requirePondAccess('pondId'), async (req, res) => {
     const pondId = req.params.pondId;
     try {
       // 1) Sensor terbaru + ambang
@@ -168,7 +170,7 @@ function registerCycleHandlers({ app, pool }) {
   });
 
   // ---- Mulai siklus baru ----
-  app.post('/api/ponds/:pondId/cycle', async (req, res) => {
+  app.post('/api/ponds/:pondId/cycle', requirePondAccess('pondId'), async (req, res) => {
     const pondId = req.params.pondId;
     try {
       const active = await pool.query(
@@ -209,7 +211,7 @@ function registerCycleHandlers({ app, pool }) {
   });
 
   // ---- Daftar panen parsial siklus aktif ----
-  app.get('/api/ponds/:pondId/cycle/harvests', async (req, res) => {
+  app.get('/api/ponds/:pondId/cycle/harvests', requirePondAccess('pondId'), async (req, res) => {
     const pondId = req.params.pondId;
     try {
       const cr = await pool.query(
@@ -224,7 +226,7 @@ function registerCycleHandlers({ app, pool }) {
   });
 
   // ---- Panen parsial (siklus tetap aktif) ----
-  app.post('/api/ponds/:pondId/cycle/harvest-partial', async (req, res) => {
+  app.post('/api/ponds/:pondId/cycle/harvest-partial', requirePondAccess('pondId'), async (req, res) => {
     const pondId = req.params.pondId;
     try {
       const cr = await pool.query(
@@ -291,7 +293,7 @@ function registerCycleHandlers({ app, pool }) {
   });
 
   // ---- Panen Final (tutup siklus + rekap semua panen parsial + hitung performa & ekonomi) ----
-  app.post('/api/ponds/:pondId/cycle/harvest', async (req, res) => {
+  app.post('/api/ponds/:pondId/cycle/harvest', requirePondAccess('pondId'), async (req, res) => {
     const pondId = req.params.pondId;
     try {
       const cr = await pool.query(
@@ -425,7 +427,7 @@ function registerCycleHandlers({ app, pool }) {
   });
 
   // ---- Riwayat siklus ----
-  app.get('/api/ponds/:pondId/cycles', async (req, res) => {
+  app.get('/api/ponds/:pondId/cycles', requirePondAccess('pondId'), async (req, res) => {
     try {
       const r = await pool.query(
         `SELECT * FROM pond_cycles WHERE pond_id=$1 ORDER BY created_at DESC`, [req.params.pondId]);
@@ -434,7 +436,7 @@ function registerCycleHandlers({ app, pool }) {
   });
 
   // ---- Batalkan siklus aktif (tanpa panen) ----
-  app.post('/api/ponds/:pondId/cycle/cancel', async (req, res) => {
+  app.post('/api/ponds/:pondId/cycle/cancel', requireRole('pemilik', 'superadmin'), requirePondAccess('pondId'), async (req, res) => {
     try {
       const r = await pool.query(
         `UPDATE pond_cycles SET status='cancelled', notes=COALESCE($2, notes)
@@ -468,7 +470,7 @@ function registerCycleHandlers({ app, pool }) {
   }
 
   // Sesi sampling yang sedang berjalan (+ entries)
-  app.get('/api/ponds/:pondId/biomass/current', async (req, res) => {
+  app.get('/api/ponds/:pondId/biomass/current', requirePondAccess('pondId'), async (req, res) => {
     try {
       const r = await pool.query(
         `SELECT sample_id FROM biomass_samples WHERE pond_id=$1 AND status='in_progress' ORDER BY sampled_at DESC LIMIT 1`,
@@ -479,7 +481,7 @@ function registerCycleHandlers({ app, pool }) {
   });
 
   // Mulai sesi sampling (atau kembalikan yang sedang berjalan)
-  app.post('/api/ponds/:pondId/biomass/start', async (req, res) => {
+  app.post('/api/ponds/:pondId/biomass/start', requirePondAccess('pondId'), async (req, res) => {
     const pondId = req.params.pondId;
     try {
       const ex = await pool.query(
@@ -496,7 +498,7 @@ function registerCycleHandlers({ app, pool }) {
   });
 
   // Tambah timbangan satu ikan
-  app.post('/api/ponds/:pondId/biomass/entry', async (req, res) => {
+  app.post('/api/ponds/:pondId/biomass/entry', requirePondAccess('pondId'), async (req, res) => {
     const pondId = req.params.pondId;
     try {
       const w = parseFloat(req.body?.weight_g);
@@ -514,7 +516,7 @@ function registerCycleHandlers({ app, pool }) {
   });
 
   // Hapus satu entry
-  app.delete('/api/ponds/:pondId/biomass/entry/:entryId', async (req, res) => {
+  app.delete('/api/ponds/:pondId/biomass/entry/:entryId', requireRole('pemilik', 'superadmin'), requirePondAccess('pondId'), async (req, res) => {
     try {
       const er = await pool.query(`SELECT sample_id FROM biomass_sample_entries WHERE id=$1`, [req.params.entryId]);
       if (!er.rows.length) return res.status(404).json({ error: 'Entry tak ada.' });
@@ -526,7 +528,7 @@ function registerCycleHandlers({ app, pool }) {
   });
 
   // Finalisasi: hitung rata-rata + auto feeding-rate + update siklus aktif
-  app.post('/api/ponds/:pondId/biomass/finalize', async (req, res) => {
+  app.post('/api/ponds/:pondId/biomass/finalize', requirePondAccess('pondId'), async (req, res) => {
     const pondId = req.params.pondId;
     try {
       const r = await pool.query(
@@ -547,7 +549,7 @@ function registerCycleHandlers({ app, pool }) {
   });
 
   // Riwayat sampling selesai (untuk kurva pertumbuhan)
-  app.get('/api/ponds/:pondId/biomass', async (req, res) => {
+  app.get('/api/ponds/:pondId/biomass', requirePondAccess('pondId'), async (req, res) => {
     try {
       const r = await pool.query(
         `SELECT sample_id, cycle_id, sample_count, avg_weight_g, feeding_rate_percent, sampled_at
@@ -565,7 +567,7 @@ function registerCycleHandlers({ app, pool }) {
   }
 
   // Stok pakan + harga
-  app.get('/api/ponds/:pondId/feed-stock', async (req, res) => {
+  app.get('/api/ponds/:pondId/feed-stock', requirePondAccess('pondId'), async (req, res) => {
     try {
       await ensureFeedStock(req.params.pondId);
       const r = await pool.query(`SELECT * FROM feed_stock WHERE pond_id=$1`, [req.params.pondId]);
@@ -574,7 +576,7 @@ function registerCycleHandlers({ app, pool }) {
   });
 
   // Update stok pakan: set stok / tambah stok / threshold / harga
-  app.put('/api/ponds/:pondId/feed-stock', async (req, res) => {
+  app.put('/api/ponds/:pondId/feed-stock', requirePondAccess('pondId'), async (req, res) => {
     const pondId = req.params.pondId;
     try {
       await ensureFeedStock(pondId);
@@ -594,7 +596,7 @@ function registerCycleHandlers({ app, pool }) {
   });
 
   // Biaya operasional siklus aktif
-  app.get('/api/ponds/:pondId/costs', async (req, res) => {
+  app.get('/api/ponds/:pondId/costs', requirePondAccess('pondId'), async (req, res) => {
     try {
       const cyc = await pool.query(`SELECT cycle_id FROM pond_cycles WHERE pond_id=$1 AND status='active' LIMIT 1`, [req.params.pondId]);
       if (!cyc.rows.length) return res.json([]);
@@ -603,7 +605,7 @@ function registerCycleHandlers({ app, pool }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  app.post('/api/ponds/:pondId/costs', async (req, res) => {
+  app.post('/api/ponds/:pondId/costs', requirePondAccess('pondId'), async (req, res) => {
     try {
       const cyc = await pool.query(`SELECT cycle_id FROM pond_cycles WHERE pond_id=$1 AND status='active' LIMIT 1`, [req.params.pondId]);
       if (!cyc.rows.length) return res.status(400).json({ error: 'Tidak ada siklus aktif.' });
@@ -617,13 +619,13 @@ function registerCycleHandlers({ app, pool }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  app.delete('/api/ponds/:pondId/costs/:id', async (req, res) => {
+  app.delete('/api/ponds/:pondId/costs/:id', requireRole('pemilik', 'superadmin'), requirePondAccess('pondId'), async (req, res) => {
     try { await pool.query(`DELETE FROM operational_costs WHERE id=$1`, [req.params.id]); res.json({ success: true }); }
     catch (e) { res.status(500).json({ error: e.message }); }
   });
 
   // Proyeksi finansial siklus aktif (biaya berjalan + estimasi panen)
-  app.get('/api/ponds/:pondId/financial', async (req, res) => {
+  app.get('/api/ponds/:pondId/financial', requirePondAccess('pondId'), async (req, res) => {
     const pondId = req.params.pondId;
     try {
       const cr = await pool.query(`SELECT * FROM pond_cycles WHERE pond_id=$1 AND status='active' ORDER BY start_date DESC LIMIT 1`, [pondId]);
@@ -655,14 +657,14 @@ function registerCycleHandlers({ app, pool }) {
   // ====================================================================
 
   // ---- Logbook / catatan ----
-  app.get('/api/ponds/:pondId/logbook', async (req, res) => {
+  app.get('/api/ponds/:pondId/logbook', requirePondAccess('pondId'), async (req, res) => {
     try {
       const r = await pool.query(
         `SELECT * FROM pond_logbook WHERE pond_id=$1 ORDER BY recorded_at DESC LIMIT 200`, [req.params.pondId]);
       res.json(r.rows);
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
-  app.post('/api/ponds/:pondId/logbook', async (req, res) => {
+  app.post('/api/ponds/:pondId/logbook', requirePondAccess('pondId'), async (req, res) => {
     try {
       const { entry_type = 'observasi', content } = req.body || {};
       if (!content || !content.trim()) return res.status(400).json({ error: 'Isi catatan kosong.' });
@@ -673,13 +675,13 @@ function registerCycleHandlers({ app, pool }) {
       res.json(r.rows[0]);
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
-  app.delete('/api/ponds/:pondId/logbook/:id', async (req, res) => {
+  app.delete('/api/ponds/:pondId/logbook/:id', requireRole('pemilik', 'superadmin'), requirePondAccess('pondId'), async (req, res) => {
     try { await pool.query(`DELETE FROM pond_logbook WHERE id=$1`, [req.params.id]); res.json({ success: true }); }
     catch (e) { res.status(500).json({ error: e.message }); }
   });
 
   // ---- Audit kualitas air N hari (forensik kematian) ----
-  app.get('/api/ponds/:pondId/water-audit', async (req, res) => {
+  app.get('/api/ponds/:pondId/water-audit', requirePondAccess('pondId'), async (req, res) => {
     try {
       const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 30);
       const end = req.query.date ? new Date(req.query.date) : new Date();
@@ -722,7 +724,7 @@ function registerCycleHandlers({ app, pool }) {
     };
     return cols.join(',') + '\n' + rows.map(r => cols.map(c => esc(r[c])).join(',')).join('\n');
   }
-  app.get('/api/ponds/:pondId/export', async (req, res) => {
+  app.get('/api/ponds/:pondId/export', requirePondAccess('pondId'), async (req, res) => {
     const pondId = req.params.pondId;
     const type = String(req.query.type || 'sensors');
     try {
@@ -739,7 +741,7 @@ function registerCycleHandlers({ app, pool }) {
   });
 
   // ---- Arsip kolam ----
-  app.put('/api/ponds/:pondId/archive', async (req, res) => {
+  app.put('/api/ponds/:pondId/archive', requireRole('pemilik', 'superadmin'), requirePondAccess('pondId'), async (req, res) => {
     try {
       const isActive = req.body?.is_active === true;   // is_active=true → aktifkan, false → arsipkan
       const r = await pool.query(`UPDATE ponds SET is_active=$2 WHERE pond_id=$1 RETURNING pond_id, is_active`,

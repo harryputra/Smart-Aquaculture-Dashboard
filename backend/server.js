@@ -24,6 +24,7 @@ app.set('trust proxy', 1);   // di belakang nginx/cloudflare → req.ip benar
 // Fase 2: gerbang auth global (semua /api wajib login kecuali auth/health/quick-login)
 // + kebijakan peran (pengamat read-only, hapus = pemilik+). Scoping tenant di tiap query.
 const { authGate, rolePolicy } = require('./auth');
+const { requireRole, requirePondAccess, requireDeviceAccess, orgFilter } = require('./authorize');
 app.use(authGate);
 app.use(rolePolicy);
 
@@ -40,6 +41,7 @@ const pool = new Pool({
 
 pool.on('connect', () => console.log('✓ PostgreSQL terhubung'));
 pool.on('error', (err) => console.error('✗ PostgreSQL error:', err));
+app.locals.pool = pool;   // agar middleware authorize.js bisa mengakses pool
 
 // ============================
 // MQTT Client
@@ -610,7 +612,7 @@ app.delete('/api/ponds/:id', async (req, res) => {
 });
 
 // ----- Sensors -----
-app.get('/api/sensors/:pondId/latest', async (req, res) => {
+app.get('/api/sensors/:pondId/latest', requirePondAccess('pondId'), async (req, res) => {
   try {
     const r = await pool.query(
       `SELECT * FROM sensor_data WHERE pond_id = $1 ORDER BY timestamp DESC LIMIT 1`,
@@ -620,7 +622,7 @@ app.get('/api/sensors/:pondId/latest', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/sensors/:pondId/history', async (req, res) => {
+app.get('/api/sensors/:pondId/history', requirePondAccess('pondId'), async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
     const r = await pool.query(
@@ -632,7 +634,7 @@ app.get('/api/sensors/:pondId/history', async (req, res) => {
 });
 
 // ----- Control -----
-app.post('/api/control/:pondId/valve', async (req, res) => {
+app.post('/api/control/:pondId/valve', requirePondAccess('pondId'), async (req, res) => {
   try {
     const { command, source = 'manual' } = req.body;
     const p = await pool.query(`SELECT farm_id FROM ponds WHERE pond_id = $1`, [req.params.pondId]);
@@ -656,7 +658,7 @@ app.post('/api/control/:pondId/valve', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/control/:pondId/drain-cycle', async (req, res) => {
+app.post('/api/control/:pondId/drain-cycle', requirePondAccess('pondId'), async (req, res) => {
   try {
     await triggerAutoDrainCycle(req.params.pondId, 'Trigger manual oleh user');
     res.json({ success: true, message: 'Siklus drain-refill dimulai' });
@@ -664,7 +666,7 @@ app.post('/api/control/:pondId/drain-cycle', async (req, res) => {
 });
 
 // ---- Aerator (kendali DO) per kolam ----
-app.get('/api/aerator/:pondId', async (req, res) => {
+app.get('/api/aerator/:pondId', requirePondAccess('pondId'), async (req, res) => {
   try {
     const t = (await pool.query(
       `SELECT aerator_mode, aerator_do_on, aerator_do_off, aerator_manual_on
@@ -675,7 +677,7 @@ app.get('/api/aerator/:pondId', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put('/api/aerator/:pondId', async (req, res) => {
+app.put('/api/aerator/:pondId', requirePondAccess('pondId'), async (req, res) => {
   try {
     const b = req.body || {};
     const mode = ['auto', 'manual', 'off'].includes(b.mode) ? b.mode : 'auto';
@@ -732,7 +734,7 @@ app.get('/api/water-devices', async (req, res) => {
 });
 
 // Simulasi - khusus untuk dummy mode
-app.post('/api/control/:pondId/simulate', async (req, res) => {
+app.post('/api/control/:pondId/simulate', requireRole('pemilik'), requirePondAccess('pondId'), async (req, res) => {
   try {
     const { temperature, depth, dissolved_oxygen, turbidity, ph } = req.body;
     const p = await pool.query(`SELECT farm_id FROM ponds WHERE pond_id = $1`, [req.params.pondId]);
@@ -750,7 +752,7 @@ app.post('/api/control/:pondId/simulate', async (req, res) => {
 });
 
 // Set mode dummy/esp32
-app.put('/api/ponds/:id/mode', async (req, res) => {
+app.put('/api/ponds/:id/mode', requireRole('pemilik'), requirePondAccess('id'), async (req, res) => {
   try {
     const { mode } = req.body; // 'dummy' atau 'esp32'
     await pool.query(`UPDATE ponds SET device_mode = $1 WHERE pond_id = $2`, [mode, req.params.id]);
@@ -759,14 +761,14 @@ app.put('/api/ponds/:id/mode', async (req, res) => {
 });
 
 // ----- Thresholds -----
-app.get('/api/thresholds/:pondId', async (req, res) => {
+app.get('/api/thresholds/:pondId', requirePondAccess('pondId'), async (req, res) => {
   try {
     const r = await pool.query(`SELECT * FROM sensor_thresholds WHERE pond_id = $1`, [req.params.pondId]);
     res.json(r.rows[0] || null);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put('/api/thresholds/:pondId', async (req, res) => {
+app.put('/api/thresholds/:pondId', requirePondAccess('pondId'), async (req, res) => {
   try {
     const { temp_min, temp_max, depth_min, depth_max, do_min, do_max, turbidity_max, ph_min, ph_max, auto_drain_enabled, auto_refill_enabled, feed_level_low_cm } = req.body;
     const r = await pool.query(
@@ -843,7 +845,7 @@ app.delete('/api/feeding-schedules/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/feeding-logs/:pondId', async (req, res) => {
+app.get('/api/feeding-logs/:pondId', requirePondAccess('pondId'), async (req, res) => {
   try {
     const r = await pool.query(
       `SELECT * FROM feeding_logs WHERE pond_id = $1 ORDER BY timestamp DESC LIMIT 50`,
@@ -872,7 +874,7 @@ app.post('/api/feeding-logs', async (req, res) => {
 });
 
 // ----- Mortality -----
-app.get('/api/mortality/:pondId', async (req, res) => {
+app.get('/api/mortality/:pondId', requirePondAccess('pondId'), async (req, res) => {
   try {
     const r = await pool.query(
       `SELECT * FROM mortality_records WHERE pond_id = $1 ORDER BY recorded_at DESC LIMIT 100`,
@@ -882,7 +884,7 @@ app.get('/api/mortality/:pondId', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/mortality/:pondId/summary', async (req, res) => {
+app.get('/api/mortality/:pondId/summary', requirePondAccess('pondId'), async (req, res) => {
   try {
     const r = await pool.query(`
       SELECT 
@@ -979,9 +981,13 @@ app.put('/api/mortality/:id', async (req, res) => {
 app.get('/api/notifications', async (req, res) => {
   try {
     const { pond_id, unread_only, limit = 50 } = req.query;
+    const org = req.auth?.org || null;
     let q = `SELECT n.*, p.name as pond_name FROM notifications n 
-             LEFT JOIN ponds p ON n.pond_id = p.pond_id WHERE 1=1`;
+             LEFT JOIN ponds p ON n.pond_id = p.pond_id
+             LEFT JOIN farms f ON p.farm_id = f.farm_id
+             WHERE 1=1`;
     const params = [];
+    if (org) { params.push(org); q += ` AND f.org_id = $${params.length}`; }
     if (pond_id) { params.push(pond_id); q += ` AND n.pond_id = $${params.length}`; }
     if (unread_only === 'true') q += ` AND n.is_read = FALSE`;
     q += ` ORDER BY n.created_at DESC LIMIT ${parseInt(limit)}`;
@@ -992,7 +998,14 @@ app.get('/api/notifications', async (req, res) => {
 
 app.get('/api/notifications/unread-count', async (req, res) => {
   try {
-    const r = await pool.query(`SELECT COUNT(*) as count FROM notifications WHERE is_read = FALSE`);
+    const org = req.auth?.org || null;
+    const q = org
+      ? `SELECT COUNT(*) as count FROM notifications n
+         LEFT JOIN ponds p ON n.pond_id = p.pond_id
+         LEFT JOIN farms f ON p.farm_id = f.farm_id
+         WHERE n.is_read = FALSE AND f.org_id = $1`
+      : `SELECT COUNT(*) as count FROM notifications WHERE is_read = FALSE`;
+    const r = await pool.query(q, org ? [org] : []);
     res.json({ count: parseInt(r.rows[0].count) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1012,7 +1025,7 @@ app.put('/api/notifications/read-all', async (req, res) => {
 });
 
 // ----- Logs -----
-app.get('/api/logs/:pondId', async (req, res) => {
+app.get('/api/logs/:pondId', requirePondAccess('pondId'), async (req, res) => {
   try {
     const r = await pool.query(
       `SELECT * FROM control_logs WHERE pond_id = $1 ORDER BY timestamp DESC LIMIT 100`,
@@ -1025,13 +1038,27 @@ app.get('/api/logs/:pondId', async (req, res) => {
 // ----- Dashboard summary -----
 app.get('/api/dashboard/summary', async (req, res) => {
   try {
+    const org = req.auth?.org || null;
+    // Superadmin (org=null) → statistik global; user lain → per organisasi.
+    const orgWhere = org ? ` WHERE f.org_id = $1` : '';
+    const orgJoin = org ? ` JOIN farms f ON p.farm_id = f.farm_id` : '';
+    const prms = org ? [org] : [];
     const [farms, ponds, devices, mortality, notifications, feeding] = await Promise.all([
-      pool.query(`SELECT COUNT(*) as count FROM farms`),
-      pool.query(`SELECT COUNT(*) as count FROM ponds`),
-      pool.query(`SELECT COUNT(*) as connected FROM device_status WHERE is_connected = TRUE`),
-      pool.query(`SELECT COALESCE(SUM(death_count), 0) as total FROM mortality_records WHERE recorded_at > NOW() - INTERVAL '30 days'`),
-      pool.query(`SELECT COUNT(*) as count FROM notifications WHERE is_read = FALSE`),
-      pool.query(`SELECT COUNT(*) as count FROM feeding_logs WHERE timestamp > NOW() - INTERVAL '24 hours'`),
+      pool.query(`SELECT COUNT(*) as count FROM farms${org ? ' WHERE org_id = $1' : ''}`, prms),
+      pool.query(`SELECT COUNT(*) as count FROM ponds p${orgJoin}${org ? orgWhere : ''}`, prms),
+      pool.query(`SELECT COUNT(*) as connected FROM device_status ds
+                  JOIN ponds p ON ds.pond_id = p.pond_id${orgJoin}
+                  WHERE ds.is_connected = TRUE${org ? ' AND f.org_id = $1' : ''}`, prms),
+      pool.query(`SELECT COALESCE(SUM(m.death_count), 0) as total FROM mortality_records m
+                  JOIN ponds p ON m.pond_id = p.pond_id${orgJoin}
+                  WHERE m.recorded_at > NOW() - INTERVAL '30 days'${org ? ' AND f.org_id = $1' : ''}`, prms),
+      pool.query(`SELECT COUNT(*) as count FROM notifications n
+                  LEFT JOIN ponds p ON n.pond_id = p.pond_id
+                  LEFT JOIN farms f ON p.farm_id = f.farm_id
+                  WHERE n.is_read = FALSE${org ? ' AND f.org_id = $1' : ''}`, prms),
+      pool.query(`SELECT COUNT(*) as count FROM feeding_logs fl
+                  JOIN ponds p ON fl.pond_id = p.pond_id${orgJoin}
+                  WHERE fl.timestamp > NOW() - INTERVAL '24 hours'${org ? ' AND f.org_id = $1' : ''}`, prms),
     ]);
 
     res.json({

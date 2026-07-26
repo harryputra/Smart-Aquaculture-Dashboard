@@ -5,6 +5,7 @@ import {
   Calendar, FileText, Settings, AlertCircle, Sprout, Scale, Wallet, ClipboardList,
 } from 'lucide-react';
 import { getPond, getSensorHistory } from '../services/api';
+import { useCan } from '../context/AuthContext';
 import MonitorTab from '../components/MonitorTab';
 import ControlTab from '../components/ControlTab';
 import FeedingTab from '../components/FeedingTab';
@@ -23,6 +24,7 @@ export default function PondDetail() {
   const [pond, setPond] = useState(null);
   const [history, setHistory] = useState([]);
   const [tab, setTab] = useState('cycle');
+  const { canFinance, canManageUsers } = useCan();
 
   async function loadPond() {
     try {
@@ -50,7 +52,7 @@ export default function PondDetail() {
       { id: 'cycle', label: 'Siklus', icon: Sprout },
       { id: 'biomass', label: 'Biomassa', icon: Scale },
       { id: 'mortality', label: 'Kematian', icon: Skull },
-      { id: 'financial', label: 'Keuangan', icon: Wallet },
+      ...(canFinance ? [{ id: 'financial', label: 'Keuangan', icon: Wallet }] : []),
       { id: 'logbook', label: 'Logbook', icon: ClipboardList },
     ] },
     { group: 'Operasional', tabs: [
@@ -59,7 +61,7 @@ export default function PondDetail() {
       { id: 'feeding', label: 'Pakan', icon: Utensils },
       { id: 'schedule', label: 'Jadwal Kuras', icon: Calendar },
       { id: 'logs', label: 'Log Aktivitas', icon: FileText },
-      { id: 'settings', label: 'Pengaturan', icon: Settings },
+      ...(canManageUsers ? [{ id: 'settings', label: 'Pengaturan', icon: Settings }] : []),
     ] },
   ];
 
