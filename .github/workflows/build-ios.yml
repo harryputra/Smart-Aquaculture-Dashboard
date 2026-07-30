@@ -1,0 +1,51 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch: # Memungkinkan jalankan manual dari tab Actions di GitHub
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'mobile/**'
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.x'
+          channel: 'stable'
+          cache: true
+
+      - name: Install Dependencies
+        run: |
+          cd mobile
+          flutter pub get
+
+      - name: Build iOS Application (Unsigned IPA / Runner.app)
+        run: |
+          cd mobile
+          flutter build ios --release --no-codesign
+
+      - name: Create ZIP Artifact
+        run: |
+          cd mobile/build/ios/iphoneos
+          mkdir Payload
+          mv Runner.app Payload/
+          zip -r AquaSmart-iOS.ipa Payload
+
+      - name: Upload iOS IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AquaSmart-iOS-IPA
+          path: mobile/build/ios/iphoneos/AquaSmart-iOS.ipa
