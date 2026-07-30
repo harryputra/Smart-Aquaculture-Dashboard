@@ -490,6 +490,9 @@ class AppUser {
     this.createdAt,
   });
 
+  String get displayName => name ?? email;
+  String get initial => displayName.isNotEmpty ? displayName[0].toUpperCase() : '?';
+
   factory AppUser.fromJson(Map<String, dynamic> j) => AppUser(
         id: j['id'] ?? 0,
         email: j['email'] ?? '',

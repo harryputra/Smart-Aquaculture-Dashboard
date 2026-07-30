@@ -9,8 +9,9 @@ import 'features/farms/farms_screen.dart';
 import 'features/farms/farm_detail_screen.dart';
 import 'features/ponds/pond_detail_screen.dart';
 import 'features/notifications/notifications_screen.dart';
+import 'features/feeder/feeder_screen.dart';
 import 'features/water/water_devices_screen.dart';
-import 'features/cctv/cctv_screen.dart' show CctvScreen;
+import 'features/cctv/cctv_screen.dart' show CctvScreen, GrafanaScreen;
 import 'features/all_screens.dart';
 import 'shell_screen.dart';
 

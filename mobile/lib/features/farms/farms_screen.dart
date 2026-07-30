@@ -24,9 +24,6 @@ class _FarmsScreenState extends ConsumerState<FarmsScreen> {
   @override
   Widget build(BuildContext context) {
     final farmsAsync = ref.watch(farmsProvider);
-    final user = ref.watch(ref.read(authProvider.notifier).runtimeType == dynamic
-        ? farmsProvider
-        : farmsProvider);
 
     return Scaffold(
       appBar: AppBar(

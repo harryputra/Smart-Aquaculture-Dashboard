@@ -1,11 +1,11 @@
 import 'dart:async';
-import 'dart:typed_data';
+import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:mqtt_client/mqtt_client.dart';
+import 'package:mqtt_client/mqtt_client.dart' as mqtt;
 import 'package:mqtt_client/mqtt_server_client.dart';
 import '../app_config.dart';
 
-// ── MQTT Message ─────────────────────────────────────────────────
+// ── App MQTT Message ───────────────────────────────────────────────
 
 class MqttMessage {
   final String topic;
@@ -41,21 +41,20 @@ class MqttService {
 
       _client!
         ..useWebSocket = true
-        ..websocketProtocols = MqttClientConstants.protocolsSingleDefault
+        ..websocketProtocols = mqtt.MqttClientConstants.protocolsSingleDefault
         ..setProtocolV311()
         ..keepAlivePeriod = 60
         ..autoReconnect = true
-        ..connectionMessage = MqttConnectMessage()
+        ..connectionMessage = mqtt.MqttConnectMessage()
             .withClientIdentifier(clientId)
             .authenticateAs(AppConfig.mqttUser, AppConfig.mqttPassword)
             .startClean();
 
-      // WSS path
       _client!.websocketProtocols = ['mqtt'];
 
       await _client!.connect(AppConfig.mqttUser, AppConfig.mqttPassword);
 
-      if (_client!.connectionStatus?.state == MqttConnectionState.connected) {
+      if (_client!.connectionStatus?.state == mqtt.MqttConnectionState.connected) {
         _connected = true;
         _subscribe();
         _listenMessages();
@@ -70,22 +69,19 @@ class MqttService {
   }
 
   void _subscribe() {
-    // Subscribe to all aquaculture sensor topics
-    _client!.subscribe('aquaculture/+/+/sensors', MqttQos.atMostOnce);
-    _client!.subscribe('aquaculture/+/+/status', MqttQos.atMostOnce);
-    _client!.subscribe('lele/+/status', MqttQos.atMostOnce);
-    _client!.subscribe('lele/+/telemetry', MqttQos.atMostOnce);
+    _client!.subscribe('aquaculture/+/+/sensors', mqtt.MqttQos.atMostOnce);
+    _client!.subscribe('aquaculture/+/+/status', mqtt.MqttQos.atMostOnce);
+    _client!.subscribe('lele/+/status', mqtt.MqttQos.atMostOnce);
+    _client!.subscribe('lele/+/telemetry', mqtt.MqttQos.atMostOnce);
   }
 
   void _listenMessages() {
-    _client!.updates?.listen((List<MqttReceivedMessage<MqttMessage?>> msgs) {
+    _client!.updates?.listen((List<mqtt.MqttReceivedMessage<mqtt.MqttMessage>> msgs) {
       for (final msg in msgs) {
         try {
-          final recMsg = msg.payload as MqttPublishMessage;
-          final payload = MqttPublishPayload.bytesToStringAsString(
-              recMsg.payload.message as Uint8List);
-          
-          // Parse JSON payload
+          final recMsg = msg.payload as mqtt.MqttPublishMessage;
+          final payload = mqtt.MqttPublishPayload.bytesToStringAsString(recMsg.payload.message);
+
           final decoded = _decodeJson(payload);
           if (decoded != null) {
             _controller.add(MqttMessage(
@@ -101,20 +97,11 @@ class MqttService {
 
   Map<String, dynamic>? _decodeJson(String raw) {
     try {
-      // Simple JSON parsing without dart:convert import issue
-      return Map<String, dynamic>.from(
-        // ignore: avoid_dynamic_calls
-        (raw.isEmpty ? null : _parseJsonString(raw)) ?? {},
-      );
-    } catch (_) {
+      if (raw.isEmpty) return null;
+      final parsed = jsonDecode(raw);
+      if (parsed is Map<String, dynamic>) return parsed;
+      if (parsed is Map) return Map<String, dynamic>.from(parsed);
       return null;
-    }
-  }
-
-  Map<String, dynamic>? _parseJsonString(String s) {
-    try {
-      // Use Dart's built-in JSON via URI
-      return null; // placeholder – actual impl uses dart:convert in main file
     } catch (_) {
       return null;
     }
@@ -122,13 +109,13 @@ class MqttService {
 
   void publish(String topic, String payload) {
     if (!_connected || _client == null) return;
-    final builder = MqttClientPayloadBuilder()..addString(payload);
-    _client!.publishMessage(topic, MqttQos.atMostOnce, builder.payload!);
+    final builder = mqtt.MqttClientPayloadBuilder()..addString(payload);
+    _client!.publishMessage(topic, mqtt.MqttQos.atMostOnce, builder.payload!);
   }
 
   void subscribeTopic(String topic) {
     if (!_connected || _client == null) return;
-    _client!.subscribe(topic, MqttQos.atMostOnce);
+    _client!.subscribe(topic, mqtt.MqttQos.atMostOnce);
   }
 
   void _scheduleReconnect() {
