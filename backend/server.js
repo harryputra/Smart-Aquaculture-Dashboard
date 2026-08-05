@@ -139,6 +139,11 @@ mqttClient.on('message', async (topic, message) => {
     const [, farm_id, pond_id, type] = parts;
     const payload = JSON.parse(message.toString());
 
+    // Firmware V6P (monitoring kualitas air) mengirim DO sebagai "do";
+    // dashboard memakai "dissolved_oxygen". Normalkan agar DO ikut tersimpan
+    // & dicek ambangnya (kalau tidak, kolom DO dari node ini selalu kosong).
+    if (payload.dissolved_oxygen == null && payload.do != null) payload.dissolved_oxygen = payload.do;
+
     if (type === 'sensors') {
       latestData[pond_id] = { ...payload, farm_id, pond_id, timestamp: new Date() };
 
