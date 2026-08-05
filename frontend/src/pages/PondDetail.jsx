@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   ArrowLeft, Wifi, WifiOff, Zap, Activity, Power, Utensils, Skull,
-  Calendar, FileText, Settings, AlertCircle, Sprout, Scale, Wallet, ClipboardList,
+  Calendar, FileText, Settings, AlertCircle, Sprout, Scale, Wallet, ClipboardList, Waves,
 } from 'lucide-react';
 import { getPond, getSensorHistory } from '../services/api';
 import { useCan } from '../context/AuthContext';
@@ -78,11 +78,19 @@ export default function PondDetail() {
             {pond.fish_type} · {pond.fish_count} ekor · Luas {pond.size_m2} m²
           </p>
         </div>
-        <div className={`mode-indicator ${hasLiveDevice ? 'live' : 'dummy'}`}>
-          <span className="pulse" />
-          {isConnected ? <><Wifi size={14} /> ESP32 Terhubung</> :
-           feederOnline ? <><Zap size={14} /> Feeder Online</> :
-           <><WifiOff size={14} /> Mode Dummy</>}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          {/* Status hardware KUALITAS AIR (sensor + kuras/isi) */}
+          <div className={`mode-indicator ${isConnected ? 'live' : 'dummy'}`} title="Node monitoring & kontrol kualitas air">
+            <span className="pulse" />
+            {isConnected ? <><Waves size={14} /> Kualitas Air Online</> : <><WifiOff size={14} /> Kualitas Air Offline</>}
+          </div>
+          {/* Status hardware PAKAN (feeder) — hanya bila kolam punya mesin pakan */}
+          {pond.feeder_device_id && (
+            <div className={`mode-indicator ${feederOnline ? 'live' : 'dummy'}`} title="Mesin pemberi pakan (feeder)">
+              <span className="pulse" />
+              <Zap size={14} /> {feederOnline ? 'Feeder Online' : 'Feeder Offline'}
+            </div>
+          )}
         </div>
       </div>
 
