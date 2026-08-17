@@ -277,10 +277,16 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
           [payload.actual_total_g, payload.batch_count, payload.success, payload.feed_session_id]
         );
         if (pondId) {
+          // Sertakan cycle_id siklus aktif agar pakan dari feeder ikut terhitung di
+          // "Total Pakan" siklus (cycleMetrics memfilter WHERE cycle_id). Tanpa ini
+          // pemberian dari mesin/Rencana Pakan tak masuk total pakan sejak tebar.
+          const cyc = (await pool.query(
+            `SELECT cycle_id FROM pond_cycles WHERE pond_id=$1 AND status='active' ORDER BY start_date DESC LIMIT 1`,
+            [pondId])).rows[0]?.cycle_id || null;
           await pool.query(
-            `INSERT INTO feeding_logs (pond_id, feed_amount_kg, feed_type, triggered_by, note)
-             VALUES ($1, $2, $3, $4, $5)`,
-            [pondId, (payload.actual_total_g || 0) / 1000, 'Pelet Lele',
+            `INSERT INTO feeding_logs (pond_id, cycle_id, feed_amount_kg, feed_type, triggered_by, note)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [pondId, cyc, (payload.actual_total_g || 0) / 1000, 'Pelet Lele',
              payload.session_name?.includes('AUTO') ? 'schedule' :
              payload.session_name?.includes('WEB') ? 'remote' : 'manual',
              `${payload.session_name} - ${payload.batch_count} batch`]
