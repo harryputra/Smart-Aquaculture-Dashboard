@@ -143,8 +143,9 @@ function registerFeedPlanHandlers({ app, pool, leleMqttClient }) {
   // ---- CRON: eksekusi sesi pakan tiap menit (online-driven) ----
   cron.schedule('* * * * *', async () => {
     try {
-      const now = new Date();
-      const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      // Jam sesi diisi user dalam WIB; container server jalan UTC → bandingkan
+      // eksplisit terhadap waktu Asia/Jakarta agar 09:00 = 09:00 WIB.
+      const hhmm = new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit' });
       const due = await pool.query(
         `SELECT s.*, fp.fish_count, fp.avg_weight_g, fp.feeding_rate_percent
          FROM feed_plan_sessions s JOIN feed_plan fp ON s.pond_id = fp.pond_id
