@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Plus, Utensils, Trash2, X, Activity, Sliders, Clock, History, Terminal, Settings as SettingsIcon } from 'lucide-react';
+import { Plus, Utensils, Trash2, X, Activity, Sliders, Clock, History, Terminal, Settings as SettingsIcon, Info } from 'lucide-react';
 import {
   getFeedingSchedules, createFeedingSchedule, deleteFeedingSchedule,
-  getFeedingLogs, recordFeeding, getPondFeeder
+  getFeedingLogs, recordFeeding, getPondFeeder, getFeedPlan
 } from '../services/api';
 import FeederDetail from './FeederDetail';
 import FeedPlanCard from './FeedPlanCard';
@@ -47,6 +47,7 @@ export default function FeedingTab({ pondId }) {
   const [logForm, setLogForm] = useState({ feed_amount_kg: 2.5, feed_type: 'Pelet', note: '' });
   const [feederData, setFeederData] = useState(null);
   const [espTab, setEspTab] = useState('plan');
+  const [plan, setPlan] = useState(null);   // ringkasan Rencana Pakan (utk banner konsistensi)
 
   async function load() {
     try {
@@ -55,6 +56,7 @@ export default function FeedingTab({ pondId }) {
       setLogs(l);
       setFeederData(f);
     } catch (e) { console.error(e); }
+    try { const p = await getFeedPlan(pondId); setPlan(p); } catch (e) { /* */ }
   }
 
   async function loadFeeder() {
@@ -112,6 +114,21 @@ export default function FeedingTab({ pondId }) {
 
       {feederData?.has_device && feederData?.settings ? (
         <div style={{ marginTop: 12 }}>
+          {plan?.plan?.enabled && plan?.sessions?.length > 0 && (
+            <div style={{
+              display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 16, padding: '12px 16px',
+              borderRadius: 12, background: 'var(--accent-light)', border: '1px solid var(--accent-primary)', color: 'var(--text-primary)',
+            }}>
+              <Info size={18} style={{ color: 'var(--accent-primary)', flexShrink: 0, marginTop: 1 }} />
+              <div style={{ fontSize: 13, lineHeight: 1.55 }}>
+                <strong>Rencana Pakan AKTIF ({plan.sessions.length}×/hari).</strong> Kolam ini diberi pakan dari <strong>dashboard</strong> sesuai persen di tab <strong>Rencana Pakan</strong> — bukan jadwal onboard feeder. Karena itu:
+                <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                  <li><strong>Mode Pakan = Manual</strong> itu <em>disengaja</em> (auto‑feed onboard dimatikan agar feeder tak memberi porsi bawaannya/dobel).</li>
+                  <li>Gramasi di <strong>Data Kolam</strong> (mis. "200 g/jadwal") hanya <em>preview onboard</em> — <strong>yang dipakai</strong> adalah gram di Rencana Pakan.</li>
+                </ul>
+              </div>
+            </div>
+          )}
           <div className="tabs" style={{ marginBottom: 20, flexWrap: 'wrap' }}>
             {ESP_PANELS.map(p => {
               const Icon = p.icon;
