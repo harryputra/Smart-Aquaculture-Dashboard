@@ -765,6 +765,11 @@ void maintainNetwork() {
   if (MQTT_ENABLE) {
     reconnectMqttIfNeeded();
     mqtt.update();   // ganti mqttClient.loop() - proses pesan masuk via WSS
+    // Heartbeat status throttled (3s). Saat feeding, loop() terblokir di
+    // runFeedingSession → status tak terkirim > 30s → dashboard salah tandai
+    // OFFLINE. maintainNetwork() dipanggil di semua loop feeding, jadi ini
+    // menjaga last_seen tetap segar (cegah "offline palsu" saat memberi pakan).
+    publishDeviceStatus(false);
   }
 }
 

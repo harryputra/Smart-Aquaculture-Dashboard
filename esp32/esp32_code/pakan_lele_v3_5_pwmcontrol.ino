@@ -832,6 +832,10 @@ void maintainNetwork() {
   if (MQTT_ENABLE) {
     mqttClient.update();          // WAJIB tiap loop: pump WebSocket + keepalive
     reconnectMqttIfNeeded();
+    // Heartbeat status throttled (3s): saat feeding, loop() terblokir sehingga
+    // status tak terkirim > 30s → dashboard salah tandai OFFLINE. maintainNetwork()
+    // dipanggil di semua loop feeding → cegah "offline palsu" saat memberi pakan.
+    publishDeviceStatus(false);
   }
 #if OTA_SELFCHECK_ENABLE
   // Self-check OTA: cek manifest server saat boot (pertama) + tiap interval.
