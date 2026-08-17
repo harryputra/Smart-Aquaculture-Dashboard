@@ -189,7 +189,7 @@ export default function FeedPlanCard({ pondId }) {
 
       <p className="text-xs text-muted" style={{ marginTop: 12, display: 'flex', gap: 6, alignItems: 'flex-start' }}>
         <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 1 }} />
-        Mode <strong>online</strong>: server yang mengirim perintah ke feeder di tiap jam sesi (feeder otomatis diset ke Manual agar tak dobel dengan jadwal onboard). Jika alat/internet mati saat jam sesi, pemberian itu terlewat — nanti akan dipindah ke firmware agar jalan offline.
+        Mode <strong>online</strong>: server yang mengirim perintah ke feeder di tiap jam sesi. Saat rencana aktif, <strong>auto-feed onboard dimatikan</strong> (agar feeder tak memberi porsi bawaannya sendiri) — perlu feeder online saat disimpan. Jika alat/internet mati saat jam sesi, pemberian itu terlewat — nanti dipindah ke firmware agar jalan offline.
       </p>
     </div>
   );

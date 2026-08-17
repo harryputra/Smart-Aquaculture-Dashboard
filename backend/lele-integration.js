@@ -83,12 +83,13 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
              VALUES ($1,'success','offline','Perangkat Kembali Online',$2)`,
             [pondId, `Feeder ${payload.device_id} kembali terhubung (internet & listrik pulih).`]
           ).catch(() => {});
-          // Bila kolam punya Rencana Pakan AKTIF, kembalikan feeder ke mode Manual
-          // begitu online — supaya jadwal onboard (AUTO FEED, porsi bawaan) tidak
-          // memberi pakan sendiri; porsi persen diatur server via Rencana Pakan.
-          // (Menutup kasus: rencana disimpan saat feeder masih offline → mode belum ter-set.)
+          // Bila kolam punya Rencana Pakan AKTIF, MATIKAN auto-feed onboard begitu
+          // online — supaya jadwal onboard (AUTO FEED, porsi bawaan) tidak memberi
+          // pakan sendiri; porsi persen diatur server via Rencana Pakan. Gate onboard =
+          // autoFeedEnabled, jadi set_auto_feed (BUKAN set_feed_mode yg tak dikenali fw).
+          // (Menutup kasus: rencana disimpan saat feeder masih offline → belum ter-set.)
           const fp = await pool.query(`SELECT 1 FROM feed_plan WHERE pond_id=$1 AND enabled=TRUE`, [pondId]).catch(() => ({ rows: [] }));
-          if (fp.rows.length) sendCommand(deviceId, 'set_feed_mode', { mode: 'manual' });
+          if (fp.rows.length) sendCommand(deviceId, 'set_auto_feed', { enabled: false });
         }
 
         await pool.query(`

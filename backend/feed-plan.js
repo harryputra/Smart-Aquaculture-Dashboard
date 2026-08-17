@@ -110,15 +110,18 @@ function registerFeedPlanHandlers({ app, pool, leleMqttClient }) {
         `SELECT id, session_name, session_time, percent, enabled, sort, last_run_date
          FROM feed_plan_sessions WHERE pond_id = $1 ORDER BY sort ASC`, [pondId])).rows;
 
-      // Best-effort (perlu feeder ONLINE): saat rencana aktif → set feeder ke MANUAL
-      // (agar tak dobel dgn jadwal onboard) + SINKRONKAN jam jadwal onboard = sesi
-      // rencana, supaya tampilan "Jadwal Pakan Aktif" cocok dengan Rencana Pakan.
-      if (plan.enabled) {
-        try {
-          const dev = (await pool.query(`SELECT device_id FROM lele_devices WHERE pond_id = $1 LIMIT 1`, [pondId])).rows[0]?.device_id;
-          if (dev) {
-            const cfg = (o) => leleMqttClient.publish(`lele/device/${dev}/config`, JSON.stringify(o));
-            leleMqttClient.publish(`lele/device/${dev}/command`, JSON.stringify({ command: 'set_feed_mode', mode: 'manual', source: 'plan', timestamp: Date.now() }));
+      // Best-effort (perlu feeder ONLINE): saat rencana AKTIF → MATIKAN auto-feed
+      // onboard (gate jadwal onboard = autoFeedEnabled; firmware TIDAK mengenal
+      // set_feed_mode) supaya feeder tak memberi porsi bawaan (AUTO FEED); porsi
+      // persen diberikan server via manual_feed_gram. Juga sinkron jam slot onboard
+      // = sesi rencana (untuk tampilan + firmware offline nanti). Nonaktif → kembalikan.
+      try {
+        const dev = (await pool.query(`SELECT device_id FROM lele_devices WHERE pond_id = $1 LIMIT 1`, [pondId])).rows[0]?.device_id;
+        if (dev) {
+          const cmd = (o) => leleMqttClient.publish(`lele/device/${dev}/command`, JSON.stringify({ ...o, source: 'plan', timestamp: Date.now() }));
+          const cfg = (o) => leleMqttClient.publish(`lele/device/${dev}/config`, JSON.stringify(o));
+          if (plan.enabled) {
+            cmd({ command: 'set_auto_feed', enabled: false });
             const act = rows.filter((s) => s.enabled !== false)
               .map((s) => String(s.session_time).slice(0, 5))
               .filter((t) => /^\d{2}:\d{2}$/.test(t))
@@ -126,9 +129,11 @@ function registerFeedPlanHandlers({ app, pool, leleMqttClient }) {
             if (act.length) cfg({ feeding_per_day: act.length });   // firmware auto-gen dulu, lalu jam di-override:
             act.forEach((t, i) => { const [h, m] = t.split(':').map(Number); cfg({ schedule_index: i, hour: h, minute: m, enabled: true }); });
             for (let i = act.length; i < 6; i++) cfg({ schedule_index: i, enabled: false });
+          } else {
+            cmd({ command: 'set_auto_feed', enabled: true });   // rencana nonaktif → kembalikan jadwal onboard
           }
-        } catch (_) { /* feeder offline → dilewati */ }
-      }
+        }
+      } catch (_) { /* feeder offline → dilewati */ }
 
       res.json({ plan, ...withGrams(plan, rows) });
     } catch (e) {
