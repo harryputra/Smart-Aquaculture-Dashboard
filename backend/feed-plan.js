@@ -106,13 +106,30 @@ function registerFeedPlanHandlers({ app, pool, leleMqttClient }) {
       }
       await c.query('COMMIT');
 
-      // Best-effort: saat rencana aktif, set feeder ke MANUAL agar jadwal onboard
-      // tidak ikut memberi pakan (dashboard yang mengatur porsi). Abaikan bila offline.
-      if (plan.enabled) { try { await feederCommand(pondId, 'set_feed_mode', { mode: 'manual' }); } catch (_) {} }
-
       const rows = (await pool.query(
         `SELECT id, session_name, session_time, percent, enabled, sort, last_run_date
          FROM feed_plan_sessions WHERE pond_id = $1 ORDER BY sort ASC`, [pondId])).rows;
+
+      // Best-effort (perlu feeder ONLINE): saat rencana aktif → set feeder ke MANUAL
+      // (agar tak dobel dgn jadwal onboard) + SINKRONKAN jam jadwal onboard = sesi
+      // rencana, supaya tampilan "Jadwal Pakan Aktif" cocok dengan Rencana Pakan.
+      if (plan.enabled) {
+        try {
+          const dev = (await pool.query(`SELECT device_id FROM lele_devices WHERE pond_id = $1 LIMIT 1`, [pondId])).rows[0]?.device_id;
+          if (dev) {
+            const cfg = (o) => leleMqttClient.publish(`lele/device/${dev}/config`, JSON.stringify(o));
+            leleMqttClient.publish(`lele/device/${dev}/command`, JSON.stringify({ command: 'set_feed_mode', mode: 'manual', source: 'plan', timestamp: Date.now() }));
+            const act = rows.filter((s) => s.enabled !== false)
+              .map((s) => String(s.session_time).slice(0, 5))
+              .filter((t) => /^\d{2}:\d{2}$/.test(t))
+              .sort().slice(0, 6);
+            if (act.length) cfg({ feeding_per_day: act.length });   // firmware auto-gen dulu, lalu jam di-override:
+            act.forEach((t, i) => { const [h, m] = t.split(':').map(Number); cfg({ schedule_index: i, hour: h, minute: m, enabled: true }); });
+            for (let i = act.length; i < 6; i++) cfg({ schedule_index: i, enabled: false });
+          }
+        } catch (_) { /* feeder offline → dilewati */ }
+      }
+
       res.json({ plan, ...withGrams(plan, rows) });
     } catch (e) {
       await c.query('ROLLBACK').catch(() => {});
