@@ -209,6 +209,7 @@ MIGRATIONS=(
   database/migration-wa-providers2.sql
   database/migration-partial-harvest.sql
   database/migration-cctv.sql
+  database/migration-feed-plan.sql
 )
 apply_migrations() {
   load_env

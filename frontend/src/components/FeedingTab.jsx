@@ -5,6 +5,7 @@ import {
   getFeedingLogs, recordFeeding, getPondFeeder
 } from '../services/api';
 import FeederDetail from './FeederDetail';
+import FeedPlanCard from './FeedPlanCard';
 import JadwalPakanPanel from './lele/JadwalPakanPanel';
 import StatusSistemPanel from './lele/StatusSistemPanel';
 import PakanOtomatisPanel from './lele/PakanOtomatisPanel';
@@ -16,6 +17,7 @@ import MqttMonitorPanel from './lele/MqttMonitorPanel';
 import DataKolamPanel from './lele/DataKolamPanel';
 
 const ESP_PANELS = [
+  { id: 'plan',      label: 'Rencana Pakan',    icon: Clock },
   { id: 'status',    label: 'Status Sistem',    icon: Activity },
   { id: 'feedctl',   label: 'Kontrol Pakan',    icon: Sliders },
   { id: 'feeding',   label: 'Pakan Otomatis',   icon: Utensils },
@@ -44,7 +46,7 @@ export default function FeedingTab({ pondId }) {
   });
   const [logForm, setLogForm] = useState({ feed_amount_kg: 2.5, feed_type: 'Pelet', note: '' });
   const [feederData, setFeederData] = useState(null);
-  const [espTab, setEspTab] = useState('status');
+  const [espTab, setEspTab] = useState('plan');
 
   async function load() {
     try {
@@ -123,6 +125,7 @@ export default function FeedingTab({ pondId }) {
             })}
           </div>
 
+          {espTab === 'plan'      && <FeedPlanCard pondId={pondId} />}
           {espTab === 'status'    && <StatusSistemPanel device={feederData.settings} onAssign={() => {}} />}
           {espTab === 'feedctl'   && <FeedControlSyncPanel device={feederData.settings} />}
           {espTab === 'feeding'   && <PakanOtomatisPanel device={feederData.settings} />}

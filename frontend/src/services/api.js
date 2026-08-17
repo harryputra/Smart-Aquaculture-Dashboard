@@ -53,6 +53,12 @@ export const createCctvCamera = (data) => req('/cctv/cameras', { method: 'POST',
 export const updateCctvCamera = (id, data) => req(`/cctv/cameras/${id}`, { method: 'PUT', body: data });
 export const deleteCctvCamera = (id) => req(`/cctv/cameras/${id}`, { method: 'DELETE' });
 
+// Rencana Pakan (feed plan) — distribusi persen kebutuhan harian per kolam
+export const getFeedPlan = (pondId) => req(`/ponds/${pondId}/feed-plan`);
+export const saveFeedPlan = (pondId, data) => req(`/ponds/${pondId}/feed-plan`, { method: 'PUT', body: data });
+export const getFeedPlanLastSampling = (pondId) => req(`/ponds/${pondId}/feed-plan/last-sampling`);
+export const testFeedPlanSession = (pondId, grams) => req(`/ponds/${pondId}/feed-plan/test`, { method: 'POST', body: { grams } });
+
 // Quick-Login
 export const getQuickLoginPublic = (token) =>
   req('/quick-login/public' + (token ? `?token=${encodeURIComponent(token)}` : ''));

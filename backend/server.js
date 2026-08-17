@@ -1108,6 +1108,9 @@ registerDbExplorer({ app, pool });
 const { registerCctvHandlers } = require('./cctv');
 registerCctvHandlers({ app, pool });
 
+const { registerFeedPlanHandlers } = require('./feed-plan');
+registerFeedPlanHandlers({ app, pool, leleMqttClient });
+
 // Pengelolaan siklus budidaya (tebar→panen) — lihat docs/RENCANA-PENGELOLAAN-KOLAM.md
 const { registerCycleHandlers } = require('./cycle-management');
 registerCycleHandlers({ app, pool });
