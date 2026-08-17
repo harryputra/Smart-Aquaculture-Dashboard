@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Clock, Wand2, Save, Power, AlertCircle, History, CheckCircle, XCircle } from 'lucide-react';
 import { remoteUpdateSchedule, remoteAutoGenSchedule, getSyncedSchedules, getLeleSessions } from '../../services/leleApi';
+import { getFeedPlan } from '../../services/api';
 
 export default function JadwalPakanPanel({ device }) {
   const [synced, setSynced] = useState([]);
   const [sessions, setSessions] = useState([]);
+  const [planSessions, setPlanSessions] = useState([]);
   const [editing, setEditing] = useState(null);
   const [busy, setBusy] = useState(false);
 
@@ -17,6 +19,10 @@ export default function JadwalPakanPanel({ device }) {
       setSynced(sch);
       setSessions(sess);
     } catch (e) { /* */ }
+    // Ambil porsi (persen + gram) dari Rencana Pakan kolam untuk ditumpangkan ke jadwal.
+    if (device.pond_id) {
+      try { const p = await getFeedPlan(device.pond_id); setPlanSessions(p.sessions || []); } catch (e) { /* */ }
+    }
   }
 
   useEffect(() => { load(); const i = setInterval(load, 3000); return () => clearInterval(i); }, [device.device_id]);
@@ -29,6 +35,14 @@ export default function JadwalPakanPanel({ device }) {
   const schedules = liveSchedules.length ? liveSchedules : synced.map(s => ({
     index: s.schedule_index, hour: s.hour, minute: s.minute, enabled: s.enabled,
   }));
+
+  // Peta jam 'HH:MM' → {percent, grams} dari Rencana Pakan (sesi aktif saja).
+  const planByTime = {};
+  for (const ps of planSessions) {
+    if (ps.enabled === false) continue;
+    planByTime[String(ps.session_time || '').slice(0, 5)] = { percent: Number(ps.percent), grams: Number(ps.grams) };
+  }
+  const hasPlan = Object.keys(planByTime).length > 0;
 
   async function saveOne(idx, data) {
     setBusy(true);
@@ -61,6 +75,7 @@ export default function JadwalPakanPanel({ device }) {
             <div className="card-title">⏰ Jadwal Pakan Aktif</div>
             <div className="card-subtitle">
               {feedingPerDay} jadwal aktif, next: <strong>{device.next_schedule_hhmm || '--:--'}</strong>
+              {hasPlan && <> · porsi (persen &amp; gram) dari <strong>Rencana Pakan</strong></>}
             </div>
           </div>
           <button className="btn btn-warning" onClick={handleAutoGen} disabled={busy || isOffline}>
@@ -79,6 +94,7 @@ export default function JadwalPakanPanel({ device }) {
                 minute={s.minute}
                 enabled={s.enabled}
                 isActive={i < feedingPerDay}
+                planInfo={planByTime[`${String(s.hour).padStart(2, '0')}:${String(s.minute).padStart(2, '0')}`]}
                 isEditing={isEditing}
                 isOffline={isOffline}
                 busy={busy}
@@ -142,7 +158,7 @@ export default function JadwalPakanPanel({ device }) {
   );
 }
 
-function ScheduleCard({ index, hour, minute, enabled, isActive, isEditing, isOffline, busy, onEdit, onCancel, onSave }) {
+function ScheduleCard({ index, hour, minute, enabled, isActive, planInfo, isEditing, isOffline, busy, onEdit, onCancel, onSave }) {
   const [h, setH] = useState(hour);
   const [m, setM] = useState(minute);
   const [en, setEn] = useState(enabled);
@@ -194,6 +210,14 @@ function ScheduleCard({ index, hour, minute, enabled, isActive, isEditing, isOff
             <Power size={14} style={{ color: en ? 'var(--success)' : 'var(--text-tertiary)' }} />
             <span className="text-xs">{en ? 'Aktif' : 'Nonaktif'}</span>
           </div>
+          {planInfo ? (
+            <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <span className="badge" style={{ background: 'var(--accent-light)', color: 'var(--accent-primary)', fontWeight: 800 }}>{planInfo.percent}%</span>
+              <span style={{ fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", fontSize: 14 }}>{Number(planInfo.grams || 0).toLocaleString('id-ID')} g</span>
+            </div>
+          ) : (
+            <div className="text-xs text-muted" style={{ marginBottom: 8 }}>porsi belum diatur di Rencana Pakan</div>
+          )}
           <button className="btn btn-secondary btn-sm" onClick={onEdit} disabled={isOffline || inactive} style={{ width: '100%' }}>
             ✏️ Edit
           </button>
