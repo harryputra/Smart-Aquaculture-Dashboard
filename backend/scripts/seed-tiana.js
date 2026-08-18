@@ -107,15 +107,20 @@ async function main() {
        'jl.Mekarwangi Rt.03 Rw.13 Desa Sariwangi Kec.Parongpong Kab. Bandung Barat',
        'Pak Tiana', 'Budidaya lele kelompok tani (demo UMKM)', ORG]);
 
-    // Bersihkan data seed lama untuk kolam ini (idempoten + hapus skema id lama)
+    // Bersihkan HANYA data SEED lama (idempoten) — JANGAN hapus data hardware/manual
+    // asli. Kalau kolam demo sudah dipakai feeder sungguhan, sesi & feed asli AMAN.
+    // Penanda seed: siklus id 'cyc_<key>_*', sesi 'sess_tunas_*', feeding_logs
+    // feed_type='pelet apung', sensor source='seed'. (Feeder asli: sesi 'feed_*',
+    // feed_type 'Pelet Lele' → dipertahankan.)
     const pondIds = PONDS.map(p => pid(p.key));
-    await c.query(`DELETE FROM pond_cycles WHERE pond_id = ANY($1)`, [pondIds]);
-    await c.query(`DELETE FROM mortality_records WHERE pond_id = ANY($1)`, [pondIds]);
-    await c.query(`DELETE FROM feeding_logs WHERE pond_id = ANY($1)`, [pondIds]);
-    await c.query(`DELETE FROM biomass_samples WHERE pond_id = ANY($1)`, [pondIds]);
-    await c.query(`DELETE FROM operational_costs WHERE pond_id = ANY($1)`, [pondIds]);
-    await c.query(`DELETE FROM lele_feed_sessions WHERE pond_id = ANY($1)`, [pondIds]);
-    await c.query(`DELETE FROM sensor_data WHERE pond_id = ANY($1) AND source='seed'`, [pondIds]);
+    const seedCyclePatterns = PONDS.map(p => 'cyc_' + p.key + '_%');   // cyc_c1_%, cyc_c2_%, cyc_c3_%
+    await c.query(`DELETE FROM mortality_records  WHERE cycle_id LIKE ANY($1::text[])`, [seedCyclePatterns]);
+    await c.query(`DELETE FROM biomass_samples    WHERE cycle_id LIKE ANY($1::text[])`, [seedCyclePatterns]);
+    await c.query(`DELETE FROM operational_costs  WHERE cycle_id LIKE ANY($1::text[])`, [seedCyclePatterns]);
+    await c.query(`DELETE FROM feeding_logs        WHERE pond_id = ANY($1) AND feed_type = 'pelet apung'`, [pondIds]);
+    await c.query(`DELETE FROM lele_feed_sessions  WHERE feed_session_id LIKE 'sess_tunas_%'`);
+    await c.query(`DELETE FROM sensor_data         WHERE pond_id = ANY($1) AND source='seed'`, [pondIds]);
+    await c.query(`DELETE FROM pond_cycles         WHERE cycle_id LIKE ANY($1::text[])`, [seedCyclePatterns]);
 
     for (const p of PONDS) {
       const P = pid(p.key);
