@@ -538,7 +538,9 @@ app.delete('/api/farms/:id', async (req, res) => {
 app.get('/api/ponds', async (req, res) => {
   try {
     const { farm_id, include_archived } = req.query;
-    let q = `SELECT p.*, ds.is_connected, ds.last_seen,
+    // DISTINCT ON (pond_id): 1 baris per kolam meski punya >1 perangkat (feeder)
+    // atau >1 device_status → cegah kartu kolam ganda. Feeder online diprioritaskan.
+    let inner = `SELECT DISTINCT ON (p.pond_id) p.*, ds.is_connected, ds.last_seen,
                ld.device_id  AS feeder_device_id,
                ld.name       AS feeder_name,
                ld.is_online  AS feeder_is_online
@@ -551,8 +553,9 @@ app.get('/api/ponds', async (req, res) => {
     if (farm_id) { params.push(farm_id); where.push(`p.farm_id = $${params.length}`); }
     if (req.auth?.org) { params.push(req.auth.org); where.push(`fa.org_id = $${params.length}`); }  // scoping tenant
     if (include_archived !== '1') where.push(`(p.is_active IS DISTINCT FROM FALSE)`);  // sembunyikan arsip
-    if (where.length) q += ` WHERE ` + where.join(' AND ');
-    q += ` ORDER BY p.created_at DESC`;
+    if (where.length) inner += ` WHERE ` + where.join(' AND ');
+    inner += ` ORDER BY p.pond_id, ld.is_online DESC NULLS LAST, ld.device_id`;
+    const q = `SELECT * FROM (${inner}) sub ORDER BY sub.created_at DESC`;
     const r = await pool.query(q, params);
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
