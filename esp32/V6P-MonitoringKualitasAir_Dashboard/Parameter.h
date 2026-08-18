@@ -9,25 +9,30 @@
 #define WIFI_SSID       "wifi-lele"
 #define WIFI_PASSWORD   "polman2026"
 
-#define MQTT_V1_ENABLED true                
+// SATU SERVER saja = Smart-Aquaculture-Dashboard (SAMA dengan sistem pemberi
+// pakan/feeder). Mirror ke server lama (v1) DIMATIKAN. Semua (sensor + kontrol
+// kuras/isi + OTA) lewat broker ini.
+#define MQTT_V1_ENABLED false               // v1 (mirror lama) dimatikan
 #define MQTT_SERVER     "mqtt.trin-polman.id"
 #define MQTT_PORT       443
 #define MQTT_PATH       "/"
-#define MQTT_SUBPROTO   "mqtt"             
+#define MQTT_SUBPROTO   "mqtt"
 #define MQTT_USER       "aquaculture"
 #define MQTT_PASSWORD   "aquaculture123"
 
-// ------------------ Identitas kolam di dashboard v1 (LAMA) -------------
+// (tak dipakai saat MQTT_V1_ENABLED false)
 #define FARM_ID         "farm_002"
 #define POND_ID         "pond_003"
 
-// ------------------ Server KEDUA (v2, BARU) — satu-satunya pengontrol --
-#define MQTT_SERVER_V2    "mqtt-v2.trin-polman.id"
+// ------------------ Server AKTIF (pengontrol) = dashboard ini -----------
+// Disamakan dengan feeder: broker mqtt.trin-polman.id + host OTA
+// aquaculture.trin-polman.id. Kolam Pak Tiana C1 (bersama mesin pakan).
+#define MQTT_SERVER_V2    "mqtt.trin-polman.id"
 #define MQTT_PORT_V2      443
 #define MQTT_PATH_V2      "/"
 #define MQTT_SUBPROTO_V2  "mqtt"
 #define MQTT_USER_V2      "aquaculture"
-#define MQTT_PASSWORD_V2  "aquaculture123"   
+#define MQTT_PASSWORD_V2  "aquaculture123"
 
 #define FARM_ID_V2        "farm_tunas_mekar"
 #define POND_ID_V2        "pond_c1_tunas"
@@ -65,7 +70,8 @@
 #define PUBLISH_INTERVAL_MS    3000
 
 // ------------------ OTA Configuration -------------------
+// Host self-check/unduh OTA = domain dashboard ini (SAMA dengan feeder v3.9).
 #define FIRMWARE_VERSION  "1.0.0"
-#define OTA_API_HOST_V2   "aquaculture-v2.trin-polman.id"
+#define OTA_API_HOST_V2   "aquaculture.trin-polman.id"
 
 #endif
