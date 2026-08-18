@@ -208,6 +208,7 @@ echo     Super Admin : superdemo@demo.test  / Demo12345
 echo     Pemilik     : andri@demo.test      / Demo12345
 echo     Pekerja     : pekerja@demo.test    / Demo12345
 echo     Pengamat    : pengamat@demo.test   / Demo12345
+echo     Peternak    : peternak@demo.test   / Demo12345
 echo ============================================================
 goto :end
 

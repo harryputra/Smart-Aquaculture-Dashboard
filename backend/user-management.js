@@ -7,7 +7,7 @@
 const bcrypt = require('bcryptjs');
 
 const MANAGE_ROLES = ['pemilik', 'superadmin'];
-const ASSIGNABLE = ['pemilik', 'pekerja', 'pengamat'];   // selain superadmin
+const ASSIGNABLE = ['pemilik', 'pekerja', 'pengamat', 'peternak'];   // selain superadmin
 const isSuper = (req) => req.auth?.role === 'superadmin';
 const strongPassword = (pw) =>
   typeof pw === 'string' && pw.length >= 8 && /[a-z]/.test(pw) && /[A-Z]/.test(pw) && /[0-9]/.test(pw);

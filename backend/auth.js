@@ -13,7 +13,7 @@ const ACCESS_MS = 15 * 60 * 1000;          // 15 menit
 const REFRESH_MS = 7 * 24 * 3600 * 1000;   // 7 hari
 const isProd = process.env.NODE_ENV === 'production';
 
-const ROLES = ['superadmin', 'pemilik', 'pekerja', 'pengamat'];
+const ROLES = ['superadmin', 'pemilik', 'pekerja', 'pengamat', 'peternak'];
 const cookieOpts = (maxAge) => ({ httpOnly: true, sameSite: 'lax', secure: isProd, path: '/', maxAge });
 const signAccess = (u) => jwt.sign({ uid: u.user_id, role: u.role, org: u.org_id, typ: 'access' }, SECRET, { expiresIn: '15m' });
 const signRefresh = (u) => jwt.sign({ uid: u.user_id, typ: 'refresh' }, SECRET, { expiresIn: '7d' });

@@ -12,6 +12,7 @@ const ROLE_BADGE = {
   pemilik: { bg: '#dbeafe', c: '#1d4ed8' },
   pekerja: { bg: '#d1fae5', c: '#047857' },
   pengamat: { bg: '#f3f4f6', c: '#374151' },
+  peternak: { bg: '#e0f2fe', c: '#0369a1' },
 };
 const fdt = (d) => (d ? new Date(d).toLocaleDateString('id-ID') : '-');
 const blankUser = { name: '', email: '', password: '', role: 'pekerja', org_id: '', is_active: true, quick_login: false };
@@ -26,7 +27,7 @@ export default function Users() {
   const [newOrg, setNewOrg] = useState('');
   const [qlCfg, setQlCfg] = useState(null);
 
-  const roleOptions = isSuper ? ['superadmin', 'pemilik', 'pekerja', 'pengamat'] : ['pemilik', 'pekerja', 'pengamat'];
+  const roleOptions = isSuper ? ['superadmin', 'pemilik', 'pekerja', 'pengamat', 'peternak'] : ['pemilik', 'pekerja', 'pengamat', 'peternak'];
 
   async function load() {
     try {

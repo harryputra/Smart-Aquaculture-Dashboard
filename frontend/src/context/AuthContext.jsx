@@ -70,4 +70,5 @@ export const ROLE_LABEL = {
   pemilik: 'Pemilik',
   pekerja: 'Pekerja',
   pengamat: 'Pengamat',
+  peternak: 'Peternak',
 };

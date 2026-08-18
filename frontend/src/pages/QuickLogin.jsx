@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { Waves, Zap, Shield, Crown, Wrench, Eye, ChevronRight, ArrowLeft } from 'lucide-react';
+import { Waves, Zap, Shield, Crown, Wrench, Eye, ChevronRight, ArrowLeft, Fish } from 'lucide-react';
 import { useAuth, ROLE_LABEL } from '../context/AuthContext';
 import { getQuickLoginPublic } from '../services/api';
 
@@ -9,6 +9,7 @@ const ROLE_STYLE = {
   pemilik: { icon: Crown, bg: '#dbeafe', fg: '#1d4ed8' },
   pekerja: { icon: Wrench, bg: '#d1fae5', fg: '#047857' },
   pengamat: { icon: Eye, bg: '#f1f5f9', fg: '#475569' },
+  peternak: { icon: Fish, bg: '#e0f2fe', fg: '#0369a1' },
 };
 
 const CSS = `

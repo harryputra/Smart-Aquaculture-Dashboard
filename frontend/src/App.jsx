@@ -113,43 +113,47 @@ function Shell() {
           </NavLink>
         </div>
 
-        <div className="sidebar-section">
-          <div className="sidebar-section-title">Hardware</div>
-          <NavLink to="/lele-feeder" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
-            <Cpu size={18} /> <span>Pakan Lele</span>
-          </NavLink>
-          <NavLink to="/water-devices" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
-            <Waves size={18} /> <span>Perangkat Air</span>
-          </NavLink>
-          <NavLink to="/cctv" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
-            <Video size={18} /> <span>CCTV</span>
-          </NavLink>
-          <NavLink to="/devices" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
-            <Plug size={18} /> <span>Perangkat</span>
-          </NavLink>
-          <NavLink to="/mqtt-monitor" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
-            <Radio size={18} /> <span>MQTT Monitor</span>
-          </NavLink>
-          <NavLink to="/hardware-test" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
-            <Wrench size={18} /> <span>Uji Hardware</span>
-          </NavLink>
-          <NavLink to="/firmware" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
-            <ArrowUpCircle size={18} /> <span>Firmware (OTA)</span>
-          </NavLink>
-        </div>
+        {user?.role !== 'peternak' && (
+          <>
+            <div className="sidebar-section">
+              <div className="sidebar-section-title">Hardware</div>
+              <NavLink to="/lele-feeder" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
+                <Cpu size={18} /> <span>Pakan Lele</span>
+              </NavLink>
+              <NavLink to="/water-devices" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
+                <Waves size={18} /> <span>Perangkat Air</span>
+              </NavLink>
+              <NavLink to="/cctv" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
+                <Video size={18} /> <span>CCTV</span>
+              </NavLink>
+              <NavLink to="/devices" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
+                <Plug size={18} /> <span>Perangkat</span>
+              </NavLink>
+              <NavLink to="/mqtt-monitor" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
+                <Radio size={18} /> <span>MQTT Monitor</span>
+              </NavLink>
+              <NavLink to="/hardware-test" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
+                <Wrench size={18} /> <span>Uji Hardware</span>
+              </NavLink>
+              <NavLink to="/firmware" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
+                <ArrowUpCircle size={18} /> <span>Firmware (OTA)</span>
+              </NavLink>
+            </div>
 
-        <div className="sidebar-section">
-          <div className="sidebar-section-title">Tools</div>
-          <NavLink to="/simulation" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
-            <Activity size={18} /> <span>Simulasi Dummy</span>
-          </NavLink>
-          <NavLink to="/analytics" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
-            <BarChart3 size={18} /> <span>Grafana Analytics</span>
-          </NavLink>
-          <NavLink to="/compare" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
-            <LayoutGrid size={18} /> <span>Perbandingan Kolam</span>
-          </NavLink>
-        </div>
+            <div className="sidebar-section">
+              <div className="sidebar-section-title">Tools</div>
+              <NavLink to="/simulation" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
+                <Activity size={18} /> <span>Simulasi Dummy</span>
+              </NavLink>
+              <NavLink to="/analytics" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
+                <BarChart3 size={18} /> <span>Grafana Analytics</span>
+              </NavLink>
+              <NavLink to="/compare" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
+                <LayoutGrid size={18} /> <span>Perbandingan Kolam</span>
+              </NavLink>
+            </div>
+          </>
+        )}
 
         {canManageUsers && (
           <div className="sidebar-section">
@@ -193,11 +197,13 @@ function Shell() {
           <Route path="/farms" element={<Farms />} />
           <Route path="/farms/:farmId" element={<FarmDetail />} />
           <Route path="/ponds/:pondId" element={<PondDetail />} />
-          <Route path="/simulation" element={<Simulation />} />
-          <Route path="/analytics" element={<GrafanaView />} />
-          <Route path="/compare" element={<ComparePonds />} />
+          <Route element={<RequireRole roles={['superadmin', 'pemilik', 'pekerja', 'pengamat']} />}>
+            <Route path="/simulation" element={<Simulation />} />
+            <Route path="/analytics" element={<GrafanaView />} />
+            <Route path="/compare" element={<ComparePonds />} />
+            <Route path="/lele-feeder" element={<LeleFeeder />} />
+          </Route>
           <Route path="/notifications" element={<Notifications />} />
-          <Route path="/lele-feeder" element={<LeleFeeder />} />
 
           <Route element={<RequireRole roles={['superadmin', 'pemilik']} />}>
             <Route path="/water-devices" element={<WaterDevices />} />

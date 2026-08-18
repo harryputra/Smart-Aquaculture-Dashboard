@@ -337,6 +337,7 @@ demo_accounts() {
   echo -e "    Pemilik     : ${C}andri@demo.test${N}      / Demo12345"
   echo -e "    Pekerja     : ${C}pekerja@demo.test${N}    / Demo12345"
   echo -e "    Pengamat    : ${C}pengamat@demo.test${N}   / Demo12345"
+  echo -e "    Peternak    : ${C}peternak@demo.test${N}   / Demo12345"
   hr
 }
 

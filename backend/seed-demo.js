@@ -15,6 +15,7 @@ const DEMO_ACCOUNTS = [
   { id: 'usr_demo_pemilik', email: 'andri@demo.test', name: 'Pak Andri (Pemilik)', role: 'pemilik', org: DEMO_ORG },
   { id: 'usr_demo_pekerja', email: 'pekerja@demo.test', name: 'Budi (Pekerja)', role: 'pekerja', org: DEMO_ORG },
   { id: 'usr_demo_pengamat', email: 'pengamat@demo.test', name: 'Pengamat (Demo)', role: 'pengamat', org: DEMO_ORG },
+  { id: 'usr_demo_peternak', email: 'peternak@demo.test', name: 'Pak Joko (Peternak)', role: 'peternak', org: DEMO_ORG },
 ];
 
 async function ensureDemoSeed(pool) {
