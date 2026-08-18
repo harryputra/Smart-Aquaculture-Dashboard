@@ -74,11 +74,28 @@ async function main() {
     await c.query(`INSERT INTO organizations (org_id, name) VALUES ($1,$2) ON CONFLICT (org_id) DO UPDATE SET name=EXCLUDED.name`,
       [ORG, 'Kelompok Tani Ternak Tunas Mekar']);
     const hash = bcrypt.hashSync('Tiana12345', 10);
+    
+    // Seed Super Admin (Tunas Mekar)
     await c.query(
       `INSERT INTO users (user_id, org_id, email, name, password_hash, role, quick_login)
-       VALUES ('usr_tiana',$1,'tiana@tunasmekar.id','Pak Tiana',$2,'pemilik',TRUE)
+       VALUES ('usr_tiana_super', NULL, 'superadmin@tunasmekar.id', 'Super Admin', $1, 'superadmin', TRUE)
+       ON CONFLICT (email) DO UPDATE SET name=EXCLUDED.name, role='superadmin', quick_login=TRUE, is_active=TRUE`,
+      [hash]);
+
+    // Seed Pemilik (Pak Tiana)
+    await c.query(
+      `INSERT INTO users (user_id, org_id, email, name, password_hash, role, quick_login)
+       VALUES ('usr_tiana', $1, 'tiana@tunasmekar.id', 'Pak Tiana', $2, 'pemilik', TRUE)
        ON CONFLICT (email) DO UPDATE SET org_id=EXCLUDED.org_id, name=EXCLUDED.name, role='pemilik', quick_login=TRUE, is_active=TRUE`,
       [ORG, hash]);
+
+    // Seed Peternak (Tunas Mekar)
+    await c.query(
+      `INSERT INTO users (user_id, org_id, email, name, password_hash, role, quick_login)
+       VALUES ('usr_tiana_peternak', $1, 'peternak@tunasmekar.id', 'Peternak', $2, 'peternak', TRUE)
+       ON CONFLICT (email) DO UPDATE SET org_id=EXCLUDED.org_id, name=EXCLUDED.name, role='peternak', quick_login=TRUE, is_active=TRUE`,
+      [ORG, hash]);
+
     await c.query(`UPDATE quick_login_config SET enabled=TRUE, show_button_on_login=TRUE, url_token=COALESCE(url_token,$1), updated_at=NOW() WHERE id=1`,
       [crypto.randomBytes(16).toString('hex')]);
 
@@ -205,7 +222,10 @@ async function main() {
 
     await c.query('COMMIT');
     console.log('\n✅ Seed DEMO Tunas Mekar berhasil.');
-    console.log('   Pemilik : Pak Tiana → login  tiana@tunasmekar.id / Tiana12345  (Quick-Login aktif)');
+    console.log('   Akun Quick-Login (Password: Tiana12345):');
+    console.log('     • Super Admin : superadmin@tunasmekar.id');
+    console.log('     • Pemilik     : Pak Tiana → tiana@tunasmekar.id');
+    console.log('     • Peternak    : peternak@tunasmekar.id');
     console.log('   Kolam   :');
     console.log('     • Kolam Lele C1 — mid-cycle, feeder, kualitas air normal');
     console.log('     • Kolam Lele C2 — menjelang panen, feeder, DO rendah + keruh (alert), ada sesi feeding GAGAL hari ini');
