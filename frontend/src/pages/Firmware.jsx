@@ -28,7 +28,9 @@ export default function Firmware() {
     try {
       const fw = await getFirmwareList();
       setFirmwares(fw);
-      if (!targetId) { const latest = fw.find(f => f.is_latest) || fw[0]; if (latest) setTargetId(String(latest.id)); }
+      // Target OTA di halaman ini = perangkat FEEDER (getLeleDevices). Pilih firmware
+      // model pakan_lele saja (OTA air dilakukan dari halaman Perangkat).
+      if (!targetId) { const feeder = fw.filter(f => f.model === 'pakan_lele'); const latest = feeder.find(f => f.is_latest) || feeder[0]; if (latest) setTargetId(String(latest.id)); }
     } catch (e) { /* mungkin bukan Pemilik */ }
   }
   async function loadDyn() {
@@ -95,9 +97,12 @@ export default function Firmware() {
                   onChange={e => setForm({ ...form, version: e.target.value })} /></div>
             </div>
             <div className="form-row">
-              <div className="form-group"><label className="form-label">Model</label>
-                <input className="form-input" value={form.model}
-                  onChange={e => setForm({ ...form, model: e.target.value })} /></div>
+              <div className="form-group"><label className="form-label">Model (jenis perangkat) *</label>
+                <select className="form-select" value={form.model}
+                  onChange={e => setForm({ ...form, model: e.target.value })}>
+                  <option value="pakan_lele">pakan_lele — Pemberi Pakan (Feeder)</option>
+                  <option value="kualitas_air">kualitas_air — Monitoring &amp; Kontrol Air</option>
+                </select></div>
               <div className="form-group"><label className="form-label">Catatan</label>
                 <input className="form-input" value={form.notes} placeholder="perubahan di versi ini"
                   onChange={e => setForm({ ...form, notes: e.target.value })} /></div>
@@ -149,12 +154,13 @@ export default function Firmware() {
       {/* Matriks versi per device + update */}
       <div className="card">
         <div className="card-header">
-          <div className="card-title"><Cpu size={18} /> Status Versi per Device</div>
+          <div><div className="card-title"><Cpu size={18} /> Status Versi per Device (Feeder)</div>
+            <div className="card-subtitle">Perangkat air: OTA lewat halaman <strong>Perangkat → Monitoring &amp; Kontrol Air</strong>.</div></div>
           {canOta && (
             <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
               <span className="text-xs text-muted">Target:</span>
               <select className="form-select" style={{ width: 'auto' }} value={targetId} onChange={e => setTargetId(e.target.value)}>
-                {firmwares.map(f => <option key={f.id} value={f.id}>v{f.version}{f.is_latest ? ' (latest)' : ''}</option>)}
+                {firmwares.filter(f => f.model === 'pakan_lele').map(f => <option key={f.id} value={f.id}>v{f.version}{f.is_latest ? ' (latest)' : ''}</option>)}
               </select>
               <button className="btn btn-sm btn-primary" disabled={busy || !target} onClick={rolloutCanary}
                 title="Uji 1 device dulu, bila sehat otomatis sebar ke sisanya">
