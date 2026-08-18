@@ -24,6 +24,17 @@ const dailyNeedG = (p) =>
 
 const clampFeed = (g) => Math.min(5000, Math.max(0, Math.round(g)));
 
+// Firmware >= 3.9.0 = mampu distribusi persen OFFLINE (onboard, via scheduleGram).
+// Untuk device ini dashboard push GRAM per slot + auto_feed ON, dan cron TIDAK
+// ikut memberi pakan (cegah dobel). < 3.9 = online-driven (cron kirim manual_feed).
+function verGte(v, target) {
+  const pa = String(v || '0').split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = target.split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < 3; i++) { const a = pa[i] || 0, b = pb[i] || 0; if (a > b) return true; if (a < b) return false; }
+  return true;
+}
+const isOfflineCap = (v) => verGte(v, '3.9.0');
+
 function registerFeedPlanHandlers({ app, pool, leleMqttClient }) {
   // Kirim perintah ke feeder lele kolam (bila ada device terpasang).
   async function feederCommand(pondId, command, extra = {}) {
@@ -116,19 +127,33 @@ function registerFeedPlanHandlers({ app, pool, leleMqttClient }) {
       // persen diberikan server via manual_feed_gram. Juga sinkron jam slot onboard
       // = sesi rencana (untuk tampilan + firmware offline nanti). Nonaktif → kembalikan.
       try {
-        const dev = (await pool.query(`SELECT device_id FROM lele_devices WHERE pond_id = $1 LIMIT 1`, [pondId])).rows[0]?.device_id;
-        if (dev) {
-          const cmd = (o) => leleMqttClient.publish(`lele/device/${dev}/command`, JSON.stringify({ ...o, source: 'plan', timestamp: Date.now() }));
-          const cfg = (o) => leleMqttClient.publish(`lele/device/${dev}/config`, JSON.stringify(o));
+        const dev = (await pool.query(`SELECT device_id, firmware_version FROM lele_devices WHERE pond_id = $1 LIMIT 1`, [pondId])).rows[0];
+        if (dev?.device_id) {
+          const cmd = (o) => leleMqttClient.publish(`lele/device/${dev.device_id}/command`, JSON.stringify({ ...o, source: 'plan', timestamp: Date.now() }));
+          const cfg = (o) => leleMqttClient.publish(`lele/device/${dev.device_id}/config`, JSON.stringify(o));
           if (plan.enabled) {
-            cmd({ command: 'set_auto_feed', enabled: false });
-            const act = rows.filter((s) => s.enabled !== false)
-              .map((s) => String(s.session_time).slice(0, 5))
-              .filter((t) => /^\d{2}:\d{2}$/.test(t))
-              .sort().slice(0, 6);
-            if (act.length) cfg({ feeding_per_day: act.length });   // firmware auto-gen dulu, lalu jam di-override:
-            act.forEach((t, i) => { const [h, m] = t.split(':').map(Number); cfg({ schedule_index: i, hour: h, minute: m, enabled: true }); });
-            for (let i = act.length; i < 6; i++) cfg({ schedule_index: i, enabled: false });
+            const daily = dailyNeedG(plan);
+            const act = rows.filter((s) => s.enabled !== false && /^\d{2}:\d{2}$/.test(String(s.session_time).slice(0, 5)))
+              .sort((a, b) => String(a.session_time).localeCompare(String(b.session_time))).slice(0, 6);
+            if (act.length) cfg({ feeding_per_day: act.length });
+            if (isOfflineCap(dev.firmware_version)) {
+              // v3.9+: feeder memberi pakan OFFLINE. Push jam + GRAM per slot + auto_feed ON.
+              // Cron dashboard SKIP device ini (biar tak dobel) — lihat cron di bawah.
+              cmd({ command: 'set_auto_feed', enabled: true });
+              act.forEach((s, i) => {
+                const [h, m] = String(s.session_time).slice(0, 5).split(':').map(Number);
+                cfg({ schedule_index: i, hour: h, minute: m, enabled: true, gram: clampFeed(daily * (Number(s.percent) || 0) / 100) });
+              });
+              for (let i = act.length; i < 6; i++) cfg({ schedule_index: i, enabled: false, gram: 0 });
+            } else {
+              // < v3.9: online-driven. Matikan auto_feed onboard; cron kirim manual_feed_gram.
+              cmd({ command: 'set_auto_feed', enabled: false });
+              act.forEach((s, i) => {
+                const [h, m] = String(s.session_time).slice(0, 5).split(':').map(Number);
+                cfg({ schedule_index: i, hour: h, minute: m, enabled: true });
+              });
+              for (let i = act.length; i < 6; i++) cfg({ schedule_index: i, enabled: false });
+            }
           } else {
             cmd({ command: 'set_auto_feed', enabled: true });   // rencana nonaktif → kembalikan jadwal onboard
           }
@@ -169,11 +194,15 @@ function registerFeedPlanHandlers({ app, pool, leleMqttClient }) {
       // eksplisit terhadap waktu Asia/Jakarta agar 09:00 = 09:00 WIB.
       const hhmm = new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit' });
       const due = await pool.query(
-        `SELECT s.*, fp.fish_count, fp.avg_weight_g, fp.feeding_rate_percent
+        `SELECT s.*, fp.fish_count, fp.avg_weight_g, fp.feeding_rate_percent, ld.firmware_version
          FROM feed_plan_sessions s JOIN feed_plan fp ON s.pond_id = fp.pond_id
+         LEFT JOIN lele_devices ld ON ld.pond_id = s.pond_id
          WHERE fp.enabled = TRUE AND s.enabled = TRUE AND s.session_time = $1
            AND (s.last_run_date IS NULL OR s.last_run_date <> CURRENT_DATE)`, [hhmm]);
       for (const s of due.rows) {
+        // Device v3.9+ memberi pakan sendiri (onboard/offline via scheduleGram) →
+        // cron JANGAN kirim manual_feed_gram (cegah dobel). Biarkan feeder yg jalan.
+        if (isOfflineCap(s.firmware_version)) continue;
         const grams = clampFeed(dailyNeedG(s) * (Number(s.percent) || 0) / 100);
         await pool.query(`UPDATE feed_plan_sessions SET last_run_date = CURRENT_DATE WHERE id = $1`, [s.id]);
         if (grams < 10) continue;   // porsi terlalu kecil → lewati

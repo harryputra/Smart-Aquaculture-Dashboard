@@ -11,8 +11,13 @@
 > |---|---|
 > | Anti offline‑palsu saat feeding | ✅ Selesai (deploy backend + flash firmware terbaru) |
 > | Backend OTA (katalog, upload, trigger, self‑check, rollout) | ✅ Selesai (`backend/lele-ota.js`, `frontend/src/pages/Firmware.jsx`) |
-> | Firmware OTA di feeder v3.x | 🔧 v3.5 punya; perlu di‑port ke firmware terpasang → **v3.9** |
-> | Distribusi persen **offline** (onboard) | 🔧 Perlu tambah `scheduleGram` di firmware → **v3.9** |
+> | Firmware OTA di feeder | ✅ **Kode v3.9 dibuat** (`esp32/pakan_lele_v3_9.ino`) — tinggal **compile + bootstrap flash** sekali |
+> | Distribusi persen **offline** (onboard) | ✅ **Kode v3.9 dibuat** (`scheduleGram` + backend dual‑mode) — tinggal flash |
+>
+> **v3.9 (`esp32/pakan_lele_v3_9.ino`) = v3.8 + OTA (HTTPS+sha256+rollback) +
+> `scheduleGram` (pakan persen OFFLINE) + heartbeat.** Backend `feed-plan.js`
+> otomatis: device ≥ v3.9 → onboard offline; < v3.9 → online‑driven. **Wajib
+> Anda compile & uji** sebelum produksi.
 
 ---
 
