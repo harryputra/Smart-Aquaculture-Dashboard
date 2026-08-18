@@ -1,6 +1,7 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <Update.h>
+#include "mbedtls/md.h"          // verifikasi sha256 (bukan MD5) — cocok dgn manifest backend
 #include <ArduinoJson.h>
 #include "Parameter.h"
 
@@ -8,90 +9,77 @@
 extern void publishOtaStatus(const String& state, int progress);
 extern MQTTPubSubClient mqttClient2; 
 
+static String otaHashHex(const uint8_t* h) {
+  char b[65]; for (int i = 0; i < 32; i++) sprintf(b + i * 2, "%02x", h[i]); b[64] = 0; return String(b);
+}
+
+// Unduh .bin via HTTPS, verifikasi SHA256 (mbedtls, bukan MD5), tulis ke slot
+// non-aktif, reboot. Gagal verifikasi/putus → firmware lama tetap (rollback).
 void performOTA(String url, String expectedSha256) {
+  expectedSha256.toLowerCase();
   Serial.println("[OTA] Memulai unduh dari: " + url);
-  publishOtaStatus("progress", 0); // Lapor ke dashboard: mulai download
+  publishOtaStatus("downloading", 0);
 
   WiFiClientSecure client;
-  // Melewati validasi sertifikat SSL/HTTPS sesuai aturan dashboard v2
-  client.setInsecure(); 
-
+  client.setInsecure();                       // integritas dijamin sha256 (manifest MQTT)
+  client.setTimeout(15000);
   HTTPClient http;
-  http.begin(client, url);
+  http.setConnectTimeout(15000);
+  http.setTimeout(20000);
+  if (!http.begin(client, url)) { publishOtaStatus("fail", 0); return; }
 
   int httpCode = http.GET();
   if (httpCode != HTTP_CODE_OK) {
-    Serial.printf("[OTA] Gagal download, HTTP Code: %d\n", httpCode);
-    publishOtaStatus("fail", 0);
-    http.end();
-    return;
+    Serial.printf("[OTA] HTTP %d\n", httpCode);
+    publishOtaStatus("fail", 0); http.end(); return;
+  }
+  int total = http.getSize();
+  if (total <= 0 || !Update.begin(total)) {
+    Serial.println("[OTA] Ukuran/partisi tidak valid (cek Partition Scheme ber-OTA).");
+    publishOtaStatus("fail", 0); http.end(); return;
   }
 
-  int contentLength = http.getSize();
-  bool canBegin = Update.begin(contentLength);
-  if (!canBegin) {
-    Serial.println("[OTA] Partisi flash tidak muat! Cek Partition Scheme di Arduino IDE.");
-    publishOtaStatus("fail", 0);
-    http.end();
-    return;
-  }
-
-  // Set pengecekan sidik jari digital (SHA256) untuk keamanan
-  if (expectedSha256 != "") {
-    Update.setMD5(expectedSha256.c_str()); 
-  }
+  mbedtls_md_context_t ctx; mbedtls_md_init(&ctx);
+  mbedtls_md_setup(&ctx, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), 0);
+  mbedtls_md_starts(&ctx);
 
   WiFiClient* stream = http.getStreamPtr();
-  size_t written = 0;
-  uint8_t buff[1024] = { 0 };
-  int progress = 0;
-  int lastProgress = 0;
-
-  while (http.connected() && (written < contentLength)) {
-    // Jaga koneksi MQTT agar tidak timeout dan sistem tidak restart paksa
-    mqttClient2.update(); 
-    
+  uint8_t buff[1024];
+  size_t written = 0; int lastPct = -10;
+  unsigned long lastData = millis();
+  while (http.connected() && written < (size_t)total) {
+    mqttClient2.update();                      // jaga MQTT agar tak putus saat unduh
     size_t size = stream->available();
     if (size) {
-      int c = stream->readBytes(buff, ((size > sizeof(buff)) ? sizeof(buff) : size));
-      Update.write(buff, c);
-      written += c;
-      
-      progress = (written * 100) / contentLength;
-      if (progress - lastProgress >= 5) { // Lapor progress tiap naik 5% supaya tidak spam server
-        Serial.printf("[OTA] Progress: %d%%\n", progress);
-        publishOtaStatus("progress", progress);
-        lastProgress = progress;
-      }
-    }
-    delay(1);
-  }
-
-  if (written == contentLength) {
-    Serial.println("[OTA] Download selesai.");
-  } else {
-    Serial.println("[OTA] Download terputus.");
-    Update.abort();
-    publishOtaStatus("fail", 0);
-    http.end();
-    return;
-  }
-
-  if (Update.end()) {
-    if (Update.isFinished()) {
-      Serial.println("[OTA] Update sukses! Rebooting...");
-      publishOtaStatus("success", 100);
-      delay(1000);
-      ESP.restart(); // Restart alat otomatis dengan otak baru!
+      int c = stream->readBytes(buff, size > sizeof(buff) ? sizeof(buff) : size);
+      if (c <= 0) break;
+      if (Update.write(buff, c) != (size_t)c) { Update.abort(); mbedtls_md_free(&ctx); publishOtaStatus("fail", (int)(written * 100 / total)); http.end(); return; }
+      mbedtls_md_update(&ctx, buff, c);
+      written += c; lastData = millis();
+      int pct = (int)(written * 100 / total);
+      if (pct >= lastPct + 5) { lastPct = pct; Serial.printf("[OTA] %d%%\n", pct); publishOtaStatus("downloading", pct); }
     } else {
-      Serial.println("[OTA] Update tidak sempurna.");
-      publishOtaStatus("fail", 0);
+      if (millis() - lastData > 20000) { Update.abort(); mbedtls_md_free(&ctx); publishOtaStatus("fail", (int)(written * 100 / total)); http.end(); return; }
+      delay(3);
     }
-  } else {
-    Serial.printf("[OTA] Error: %s\n", Update.errorString());
-    publishOtaStatus("fail", 0);
   }
   http.end();
+
+  if (written != (size_t)total) { Update.abort(); mbedtls_md_free(&ctx); publishOtaStatus("fail", 0); return; }
+
+  uint8_t hash[32]; mbedtls_md_finish(&ctx, hash); mbedtls_md_free(&ctx);
+  String got = otaHashHex(hash);
+  if (expectedSha256.length() == 64 && got != expectedSha256) {
+    Update.abort();
+    Serial.printf("[OTA] sha256 MISMATCH got=%s want=%s\n", got.c_str(), expectedSha256.c_str());
+    publishOtaStatus("fail", 100); return;
+  }
+  if (!Update.end(true)) { Serial.printf("[OTA] Update.end: %s\n", Update.errorString()); publishOtaStatus("fail", 100); return; }
+
+  Serial.println("[OTA] Sukses! Reboot ke firmware baru...");
+  publishOtaStatus("success", 100);
+  delay(900);
+  ESP.restart();
 }
 
 // Terpicu saat dashboard mengirim payload manifest ke topik OTA

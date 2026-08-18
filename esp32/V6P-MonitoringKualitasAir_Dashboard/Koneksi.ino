@@ -94,7 +94,10 @@ void publishSensors() {
 }
 
 void publishStatus() {
-  String p = String("{\"online\":true,\"ip\":\"") + WiFi.localIP().toString()
+  extern String deviceId;
+  String p = String("{\"device_id\":\"") + deviceId
+           + "\",\"firmware_version\":\"" + FIRMWARE_VERSION
+           + "\",\"online\":true,\"ip\":\"" + WiFi.localIP().toString()
            + "\",\"rssi\":" + String(WiFi.RSSI()) + "}";
   if (MQTT_V1_ENABLED && mqttClient.isConnected()) mqttClient.publish(topicStatus, p);
   if (mqttClient2.isConnected())                   mqttClient2.publish(topicStatus2, p);

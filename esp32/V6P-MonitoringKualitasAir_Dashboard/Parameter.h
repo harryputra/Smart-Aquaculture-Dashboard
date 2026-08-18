@@ -71,7 +71,7 @@
 
 // ------------------ OTA Configuration -------------------
 // Host self-check/unduh OTA = domain dashboard ini (SAMA dengan feeder v3.9).
-#define FIRMWARE_VERSION  "1.0.0"
+#define FIRMWARE_VERSION  "2.0.0"   // model device-id + OTA sha256 diperbaiki
 #define OTA_API_HOST_V2   "aquaculture.trin-polman.id"
 
 #endif

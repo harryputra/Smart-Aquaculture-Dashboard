@@ -19,6 +19,7 @@ String topicOta2, topicOtaStatus2;
 WebSocketsClient wsClient2;
 MQTTPubSubClient mqttClient2;
 String topicSensors2, topicStatus2, topicControl2;
+String deviceId;   // ID perangkat air dari MAC (air_<mac>) — model device-id spt feeder
 
 // --- Sensor suhu ---
 OneWire oneWire(PIN_SUHU_DS18B20);
@@ -94,12 +95,16 @@ void setup() {
   topicStatus  = String("aquaculture/") + FARM_ID + "/" + POND_ID + "/status";
   topicControl = String("aquaculture/") + FARM_ID + "/" + POND_ID + "/control";
 
-  topicSensors2 = String("aquaculture/") + FARM_ID_V2 + "/" + POND_ID_V2 + "/sensors";
-  topicStatus2  = String("aquaculture/") + FARM_ID_V2 + "/" + POND_ID_V2 + "/status";
-  topicControl2 = String("aquaculture/") + FARM_ID_V2 + "/" + POND_ID_V2 + "/control";
-
-  topicOta2       = String("aquaculture/") + FARM_ID_V2 + "/" + POND_ID_V2 + "/ota";
-  topicOtaStatus2 = String("aquaculture/") + FARM_ID_V2 + "/" + POND_ID_V2 + "/ota_status";
+  // Model DEVICE-ID (seperti feeder): topik memakai device_id dari MAC. Backend
+  // meng-ASSIGN device → kolam; firmware tak perlu hardcode farm/pond lagi.
+  uint32_t macLow = (uint32_t)(ESP.getEfuseMac() & 0xFFFFFF);
+  deviceId = String("air_") + String(macLow, HEX);
+  Serial.println("[ID] device_id: " + deviceId);
+  topicSensors2 = String("aquaculture/device/") + deviceId + "/sensors";
+  topicStatus2  = String("aquaculture/device/") + deviceId + "/status";
+  topicControl2 = String("aquaculture/device/") + deviceId + "/control";
+  topicOta2       = String("aquaculture/device/") + deviceId + "/ota";
+  topicOtaStatus2 = String("aquaculture/device/") + deviceId + "/ota_status";
 
   setupWiFiMqtt();
   Serial.println("Serial: '1'=toggle Kuras | '2'=toggle Isi.");
