@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Cpu, Wifi, WifiOff, Link2Off, Save, Waves, ArrowUpCircle, Trash2 } from 'lucide-react';
 import { getLeleDevices, assignLeleDevice } from '../services/leleApi';
-import { getPonds, getWaterDevices, assignWaterDevice, deleteWaterDevice, triggerWaterOta } from '../services/api';
+import { getPonds, getWaterDeviceList, assignWaterDevice, deleteWaterDevice, triggerWaterOta } from '../services/api';
 
 const fdt = (d) => (d ? new Date(d).toLocaleString('id-ID') : '-');
 
@@ -14,7 +14,7 @@ export default function Devices() {
     try {
       const [d, w, p] = await Promise.all([
         getLeleDevices().catch(() => []),
-        getWaterDevices().catch(() => []),
+        getWaterDeviceList().catch(() => []),
         getPonds().catch(() => []),
       ]);
       setDevices(d); setWater(w); setPonds(p);
