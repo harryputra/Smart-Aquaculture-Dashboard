@@ -19,3 +19,16 @@ CREATE TABLE IF NOT EXISTS water_devices (
   created_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_water_devices_pond ON water_devices(pond_id);
+
+-- Lalu lintas MQTT perangkat air (untuk Monitor MQTT tab "Kualitas Air").
+-- Cermin lele_mqtt_traffic.
+CREATE TABLE IF NOT EXISTS water_mqtt_traffic (
+  id         BIGSERIAL PRIMARY KEY,
+  device_id  TEXT,
+  direction  TEXT        NOT NULL,     -- in | out
+  topic      TEXT        NOT NULL,
+  payload    TEXT,
+  is_error   BOOLEAN     NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_water_traffic_created ON water_mqtt_traffic(created_at);

@@ -20,6 +20,12 @@ function registerWaterDeviceHandlers({ app, pool, mqttClient }) {
   const PUBLIC_BASE = (process.env.OTA_PUBLIC_BASE || '').replace(/\/+$/, '');
   const fileUrl = (id) => `${PUBLIC_BASE}/api/lele/firmware/download/${id}`;
 
+  // Rekam lalu lintas MQTT air (untuk Monitor MQTT tab "Kualitas Air"). Fire-and-forget.
+  function recordWaterTraffic(direction, topic, payloadStr, deviceId, isError = false) {
+    pool.query(`INSERT INTO water_mqtt_traffic (device_id, direction, topic, payload, is_error) VALUES ($1,$2,$3,$4,$5)`,
+      [deviceId || null, direction, topic, payloadStr, isError]).catch(() => {});
+  }
+
   // status/sensors device sudah tercakup subscribe aquaculture/+/+/* (server.js).
   // Tambahan: kontrol pond-based (utk di-bridge) & ota_status device.
   mqttClient.subscribe('aquaculture/+/+/control');
@@ -34,13 +40,18 @@ function registerWaterDeviceHandlers({ app, pool, mqttClient }) {
       // --- Bridge kontrol: kontrol kolam (dari backend) → device air ter-assign ---
       if (parts[3] === 'control' && parts[1] !== 'device') {
         const dev = (await pool.query(`SELECT device_id FROM water_devices WHERE pond_id=$1 LIMIT 1`, [parts[2]])).rows[0];
-        if (dev?.device_id) mqttClient.publish(`aquaculture/device/${dev.device_id}/control`, message.toString());
+        if (dev?.device_id) {
+          const t = `aquaculture/device/${dev.device_id}/control`;
+          mqttClient.publish(t, message.toString());
+          recordWaterTraffic('out', t, message.toString(), dev.device_id);
+        }
         return;
       }
 
       if (parts[1] !== 'device') return;              // sisanya: model device-id
       const deviceId = parts[2], type = parts[3];
       let payload = {}; try { payload = JSON.parse(message.toString()); } catch (_) {}
+      recordWaterTraffic('in', topic, message.toString(), deviceId, type === 'ota_status' && payload.state === 'fail');
 
       if (type === 'status') {
         await pool.query(
@@ -70,6 +81,7 @@ function registerWaterDeviceHandlers({ app, pool, mqttClient }) {
   // Tandai OFFLINE > 30 detik tanpa lapor (cermin feeder).
   setInterval(() => {
     pool.query(`UPDATE water_devices SET is_online=FALSE WHERE is_online=TRUE AND last_seen < NOW() - INTERVAL '30 seconds'`).catch(() => {});
+    pool.query(`DELETE FROM water_mqtt_traffic WHERE created_at < NOW() - INTERVAL '2 days'`).catch(() => {});
   }, 15000);
 
   // ---------------- Endpoints (pairing + OTA) ----------------
@@ -107,8 +119,30 @@ function registerWaterDeviceHandlers({ app, pool, mqttClient }) {
         : (await pool.query(`SELECT * FROM lele_firmware WHERE model='kualitas_air' AND is_latest=TRUE ORDER BY created_at DESC LIMIT 1`)).rows[0]);
       if (!fw) return res.status(404).json({ error: 'Belum ada firmware air (model "kualitas_air"). Unggah dulu di halaman Firmware.' });
       const manifest = { version: fw.version, url: fileUrl(fw.id), sha256: fw.sha256 };
-      mqttClient.publish(`aquaculture/device/${req.params.id}/ota`, JSON.stringify(manifest));
+      const otaTopic = `aquaculture/device/${req.params.id}/ota`;
+      mqttClient.publish(otaTopic, JSON.stringify(manifest));
+      recordWaterTraffic('out', otaTopic, JSON.stringify(manifest), req.params.id);
       res.json({ success: true, manifest });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Lalu lintas MQTT air (untuk Monitor MQTT tab "Kualitas Air"). afterId>0 = incremental.
+  app.get('/api/water/traffic', async (req, res) => {
+    try {
+      const afterId = parseInt(req.query.afterId) || 0;
+      const limit = Math.min(parseInt(req.query.limit) || 150, 500);
+      let r;
+      if (afterId > 0) {
+        r = await pool.query(
+          `SELECT id, device_id, direction, topic, payload, is_error, created_at
+           FROM water_mqtt_traffic WHERE id > $1 ORDER BY id ASC LIMIT $2`, [afterId, limit]);
+        res.json(r.rows);
+      } else {
+        r = await pool.query(
+          `SELECT id, device_id, direction, topic, payload, is_error, created_at
+           FROM water_mqtt_traffic ORDER BY id DESC LIMIT $1`, [limit]);
+        res.json(r.rows.reverse());
+      }
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 

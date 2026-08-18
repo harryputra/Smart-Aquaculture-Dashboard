@@ -64,6 +64,7 @@ export const getWaterDevices = () => req('/water/devices');
 export const assignWaterDevice = (id, pond_id, name) => req(`/water/devices/${id}/assign`, { method: 'PUT', body: { pond_id, name } });
 export const deleteWaterDevice = (id) => req(`/water/devices/${id}`, { method: 'DELETE' });
 export const triggerWaterOta = (id, firmware_id) => req(`/water/devices/${id}/ota`, { method: 'POST', body: firmware_id ? { firmware_id } : {} });
+export const getWaterTraffic = (afterId = 0, limit = 150) => req(`/water/traffic?afterId=${afterId}&limit=${limit}`);
 
 // Quick-Login
 export const getQuickLoginPublic = (token) =>

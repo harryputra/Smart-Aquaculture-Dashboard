@@ -4,14 +4,16 @@ import {
   Radio, AlertTriangle, Copy, Check, Wifi, WifiOff, Zap,
 } from 'lucide-react';
 import { getDeviceTraffic, getGlobalTraffic, pingDevice } from '../../services/leleApi';
+import { getWaterTraffic } from '../../services/api';
 
 const MAX_ROWS = 600;
 const POLL_MS = 1500;
 
 // Konsol MQTT 2 arah (📥 dari hardware / 📤 ke hardware). Dipakai per-device
 // (deviceId diisi) maupun global (deviceId null → tampilkan semua device).
-export default function MqttMonitorPanel({ deviceId = null, device = null }) {
+export default function MqttMonitorPanel({ deviceId = null, device = null, source = 'lele' }) {
   const isGlobal = !deviceId;
+  const isWater = isGlobal && source === 'water';
   const [rows, setRows] = useState([]);
   const [paused, setPaused] = useState(false);
   const [autoscroll, setAutoscroll] = useState(true);
@@ -29,7 +31,7 @@ export default function MqttMonitorPanel({ deviceId = null, device = null }) {
     if (pausedRef.current) return;
     try {
       const data = isGlobal
-        ? await getGlobalTraffic(lastIdRef.current)
+        ? (isWater ? await getWaterTraffic(lastIdRef.current) : await getGlobalTraffic(lastIdRef.current))
         : await getDeviceTraffic(deviceId, lastIdRef.current);
       if (data && data.length) {
         lastIdRef.current = Math.max(lastIdRef.current, ...data.map(d => d.id));
@@ -39,10 +41,10 @@ export default function MqttMonitorPanel({ deviceId = null, device = null }) {
         });
       }
     } catch (_) { /* diam: jaringan sesaat */ }
-  }, [deviceId, isGlobal]);
+  }, [deviceId, isGlobal, isWater]);
 
-  // Reset saat device berganti.
-  useEffect(() => { lastIdRef.current = 0; setRows([]); setPing(null); }, [deviceId]);
+  // Reset saat device / sumber berganti.
+  useEffect(() => { lastIdRef.current = 0; setRows([]); setPing(null); }, [deviceId, source]);
 
   useEffect(() => {
     fetchTraffic();
@@ -135,7 +137,7 @@ export default function MqttMonitorPanel({ deviceId = null, device = null }) {
         <div>
           <div className="card-title"><Radio size={18} style={{ verticalAlign: -3 }} /> Monitor Koneksi (MQTT)</div>
           <div className="card-subtitle">
-            {isGlobal ? 'Semua device — lalu lintas pesan masuk & keluar' : `Device: ${deviceId}`}
+            {isGlobal ? (isWater ? 'Perangkat AIR — lalu lintas pesan masuk & keluar' : 'Semua feeder — lalu lintas pesan masuk & keluar') : `Device: ${deviceId}`}
           </div>
         </div>
         <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
@@ -217,7 +219,7 @@ export default function MqttMonitorPanel({ deviceId = null, device = null }) {
                   {inbound ? '📥' : '📤'}
                 </span>
                 {isGlobal && <span style={{ color: '#fbbf24', minWidth: 90 }}>{r.device_id || '-'}</span>}
-                <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{r.topic.replace('lele/', '')}</span>
+                <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{r.topic.replace(/^lele\//, '').replace(/^aquaculture\/device\//, '')}</span>
                 {r.is_error && <AlertTriangle size={13} style={{ color: '#ef4444' }} />}
                 <button onClick={(ev) => { ev.stopPropagation(); copyRow(r); }}
                   style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: 2 }}
