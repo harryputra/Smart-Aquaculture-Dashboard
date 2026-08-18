@@ -135,6 +135,7 @@ mqttClient.on('message', async (topic, message) => {
   try {
     const parts = topic.split('/');
     if (parts.length < 4) return;
+    if (parts[1] === 'device') return;   // topik model device-id → ditangani modul water-devices
 
     const [, farm_id, pond_id, type] = parts;
     const payload = JSON.parse(message.toString());
@@ -1110,6 +1111,9 @@ registerCctvHandlers({ app, pool });
 
 const { registerFeedPlanHandlers } = require('./feed-plan');
 registerFeedPlanHandlers({ app, pool, leleMqttClient });
+
+const { registerWaterDeviceHandlers } = require('./water-devices');
+registerWaterDeviceHandlers({ app, pool, mqttClient });
 
 // Pengelolaan siklus budidaya (tebar→panen) — lihat docs/RENCANA-PENGELOLAAN-KOLAM.md
 const { registerCycleHandlers } = require('./cycle-management');

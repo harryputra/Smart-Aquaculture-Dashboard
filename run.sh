@@ -210,6 +210,7 @@ MIGRATIONS=(
   database/migration-partial-harvest.sql
   database/migration-cctv.sql
   database/migration-feed-plan.sql
+  database/migration-water-devices.sql
 )
 apply_migrations() {
   load_env

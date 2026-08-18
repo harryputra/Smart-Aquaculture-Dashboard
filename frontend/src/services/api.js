@@ -59,6 +59,12 @@ export const saveFeedPlan = (pondId, data) => req(`/ponds/${pondId}/feed-plan`, 
 export const getFeedPlanLastSampling = (pondId) => req(`/ponds/${pondId}/feed-plan/last-sampling`);
 export const testFeedPlanSession = (pondId, grams) => req(`/ponds/${pondId}/feed-plan/test`, { method: 'POST', body: { grams } });
 
+// Perangkat Air (pairing device-id + OTA) — cermin feeder
+export const getWaterDevices = () => req('/water/devices');
+export const assignWaterDevice = (id, pond_id, name) => req(`/water/devices/${id}/assign`, { method: 'PUT', body: { pond_id, name } });
+export const deleteWaterDevice = (id) => req(`/water/devices/${id}`, { method: 'DELETE' });
+export const triggerWaterOta = (id, firmware_id) => req(`/water/devices/${id}/ota`, { method: 'POST', body: firmware_id ? { firmware_id } : {} });
+
 // Quick-Login
 export const getQuickLoginPublic = (token) =>
   req('/quick-login/public' + (token ? `?token=${encodeURIComponent(token)}` : ''));
