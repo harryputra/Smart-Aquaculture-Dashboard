@@ -36,9 +36,10 @@ export default function PondDetail() {
 
   useEffect(() => {
     loadPond();
+    if (tab === 'settings') return;
     const id = setInterval(loadPond, 3000);
     return () => clearInterval(id);
-  }, [pondId]);
+  }, [pondId, tab]);
 
   if (!pond) return <div className="loading"><div className="spinner" /></div>;
 
