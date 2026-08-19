@@ -42,6 +42,7 @@ if /i "%CMD%"=="demo"         goto :demo
 if /i "%CMD%"=="demo-down"    goto :down
 if /i "%CMD%"=="demo-reset"   goto :demoreset
 if /i "%CMD%"=="seed-tiana"   goto :seedtiana
+if /i "%CMD%"=="backfill-feed" goto :backfillfeed
 if /i "%CMD%"=="down"         goto :down
 if /i "%CMD%"=="stop"         goto :down
 if /i "%CMD%"=="prod-down"    goto :down
@@ -225,6 +226,11 @@ goto :demo
 :seedtiana
 echo [..] Seed data Kelompok Tani Ternak Tunas Mekar (Pak Tiana)...
 %DC% exec -T backend node scripts/seed-tiana.js
+goto :end
+
+:backfillfeed
+echo [..] Backfill riwayat pemberian pakan (isi hari kosong: tebar -^> hari ini)...
+%DC% exec -T backend node scripts/backfill-feed-history.js
 goto :end
 
 :down

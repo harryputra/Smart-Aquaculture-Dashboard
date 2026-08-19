@@ -428,6 +428,7 @@ case "$cmd" in
   doctor)             do_doctor ;;
   migrate|db-migrate) need_docker; apply_migrations; ok "Migrasi selesai." ;;
   seed-tiana)         need_docker; dc exec -T backend node scripts/seed-tiana.js ;;
+  backfill-feed)      need_docker; dc exec -T backend node scripts/backfill-feed-history.js ;;
   mqtt-passwd)        need_docker; mqtt_passwd ;;
   mqtt-sub)           mqtt_sub ;;
   mqtt-test)          shift || true; mqtt_test "${1:-}" ;;
