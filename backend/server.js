@@ -929,9 +929,13 @@ app.post('/api/mortality', async (req, res) => {
       );
     }
 
-    // Kurangi fish_count
+    // Kurangi fish_count (pond + device terkait, dua kolom terpisah harus disinkronkan)
     await pool.query(
       `UPDATE ponds SET fish_count = GREATEST(0, fish_count - $1) WHERE pond_id = $2`,
+      [death_count, pond_id]
+    );
+    await pool.query(
+      `UPDATE lele_devices SET fish_count = GREATEST(0, fish_count - $1) WHERE pond_id = $2`,
       [death_count, pond_id]
     );
 
@@ -973,11 +977,15 @@ app.put('/api/mortality/:id', async (req, res) => {
     
     const r = await pool.query(query, params);
     
-    // Sesuaikan fish_count jika death_count berubah
+    // Sesuaikan fish_count jika death_count berubah (pond + device terkait)
     const diff = death_count - oldData.death_count;
     if (diff !== 0) {
       await pool.query(
         `UPDATE ponds SET fish_count = GREATEST(0, fish_count - $1) WHERE pond_id = $2`,
+        [diff, oldData.pond_id]
+      );
+      await pool.query(
+        `UPDATE lele_devices SET fish_count = GREATEST(0, fish_count - $1) WHERE pond_id = $2`,
         [diff, oldData.pond_id]
       );
     }
