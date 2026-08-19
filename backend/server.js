@@ -219,6 +219,7 @@ mqttClient.on('message', async (topic, message) => {
 
       await saveSensorData(farm_id, pond_id, payload, 'esp32');
       await checkSensorRisks(pond_id, payload);
+      await checkValveAutoStop(pond_id, payload.depth);
     } else if (type === 'status') {
       await pool.query(
         `UPDATE device_status SET is_connected = $1, last_seen = NOW(), ip_address = $2, rssi = $3, updated_at = NOW() WHERE pond_id = $4`,
