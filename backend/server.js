@@ -150,11 +150,12 @@ function clearValveWatch(pond_id, valveKind) {
 async function forceCloseValve(pond_id, valveKind, reasonCode) {
   const key = `${pond_id}:${valveKind}`;
   const watch = valveAutoStop[key];
+  if (!watch) return; // sudah ditutup oleh timer lain (mis. safetyTimer & durationTimer barengan di 15 menit)
   clearValveWatch(pond_id, valveKind);
 
   const p = await pool.query(`SELECT farm_id FROM ponds WHERE pond_id = $1`, [pond_id]);
   const farm_id = p.rows[0]?.farm_id;
-  if (!farm_id) return;
+  if (!farm_id) { console.error(`forceCloseValve: farm_id not found for pond ${pond_id}`); return; }
 
   const command = valveKind === 'drain' ? 'close_valve' : 'close_inlet';
   mqttClient.publish(valveTopic(farm_id, pond_id), JSON.stringify({ command, source: 'auto' }));
