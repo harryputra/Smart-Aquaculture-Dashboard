@@ -51,7 +51,7 @@ export default function Notifications() {
         </button>
       </div>
 
-      <div className="tabs">
+      <div className="tabs" style={{ flexWrap: 'wrap' }}>
         <button className={'tab' + (filter === 'all' ? ' active' : '')} onClick={() => setFilter('all')}>
           Semua
         </button>

@@ -94,7 +94,7 @@ export default function LastActivityPanel({ deviceId }) {
       )}
 
       {/* Sub tabs */}
-      <div className="tabs">
+      <div className="tabs" style={{ flexWrap: 'wrap' }}>
         <button className={'tab' + (subTab === 'summary' ? ' active' : '')} onClick={() => setSubTab('summary')}>
           <History size={16} /> Riwayat Feeding
         </button>

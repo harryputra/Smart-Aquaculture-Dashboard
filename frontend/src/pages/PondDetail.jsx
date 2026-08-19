@@ -111,7 +111,7 @@ export default function PondDetail() {
       {GROUPS.map(g => (
         <div key={g.group} style={{ marginBottom: 10 }}>
           <div className="text-xs text-muted" style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '4px 2px' }}>{g.group}</div>
-          <div className="tabs">
+          <div className="tabs" style={{ flexWrap: 'wrap' }}>
             {g.tabs.map(t => {
               const Icon = t.icon;
               return (

@@ -120,7 +120,7 @@ export default function RiwayatAkhirPanel({ device }) {
           </div>
         </div>
 
-        <div className="tabs" style={{ marginBottom: 16 }}>
+        <div className="tabs" style={{ marginBottom: 16, flexWrap: 'wrap' }}>
           <button className={'tab' + (activeTab === 'summary' ? ' active' : '')} onClick={() => setActiveTab('summary')}>
             <History size={14} /> Sesi Pakan ({sessions.length})
           </button>
