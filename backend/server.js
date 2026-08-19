@@ -423,6 +423,11 @@ async function triggerAutoDrainCycle(pond_id, reason) {
     }
 
     await pool.query(
+      `INSERT INTO control_logs (pond_id, action, triggered_by, reason) VALUES ($1, 'valve_close', 'auto', $2)`,
+      [pond_id, 'Auto-drain: kuras selesai, lanjut isi ulang']
+    );
+
+    await pool.query(
       `INSERT INTO control_logs (pond_id, action, triggered_by, reason) VALUES ($1, 'inlet_open', 'auto', $2)`,
       [pond_id, 'Auto-refill setelah drain']
     );
@@ -812,6 +817,26 @@ app.post('/api/control/:pondId/valve', requirePondAccess('pondId'), async (req, 
         // buat kegagalannya terlihat jelas di log + response (bukan diam-diam
         // jadi "Kontrol manual" biasa seolah semua baik-baik saja).
         reason = `Auto-stop diminta (${auto_stop.mode}) tapi gagal dihitung — katup dibuka TANPA proteksi auto-stop`;
+
+        // Tapi batas pengaman 15 menit WAJIB tetap berlaku di SEMUA mode --
+        // kalau belum ada watch lain yg aktif utk valve ini, pasang watch
+        // "safety-only" (cuma safetyTimer, tanpa target/durasi) supaya katup
+        // tetap dipaksa tutup di menit ke-15, tak pernah nyangkut terbuka
+        // selamanya walau proteksi spesifik yg diminta gagal dihitung.
+        if (!valveAutoStop[`${pond_id}:${valveKind}`]) {
+          valveAutoStop[`${pond_id}:${valveKind}`] = {
+            mode: 'safety_only',
+            targetDepth: null,
+            durationMinutes: null,
+            startedAt: new Date(),
+            safetyTimer: setTimeout(
+              () => forceCloseValve(pond_id, valveKind, 'safety_cap')
+                .catch(err => console.error('forceCloseValve (safety_cap) failed:', err.message)),
+              VALVE_SAFETY_CAP_MS
+            ),
+            durationTimer: null,
+          };
+        }
       }
     }
 
@@ -947,6 +972,7 @@ app.post('/api/control/:pondId/simulate', requireRole('pemilik'), requirePondAcc
     latestData[req.params.pondId] = { ...data, farm_id, pond_id: req.params.pondId, timestamp: new Date() };
     await saveSensorData(farm_id, req.params.pondId, data, 'dummy');
     await checkSensorRisks(req.params.pondId, data);
+    await checkValveAutoStop(req.params.pondId, depth);
 
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
