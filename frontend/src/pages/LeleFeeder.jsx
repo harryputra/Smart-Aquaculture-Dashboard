@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { getLeleDevices, assignLeleDevice } from '../services/leleApi';
 import { getPonds } from '../services/api';
+import { useCan } from '../context/AuthContext';
 
 import StatusSistemPanel    from '../components/lele/StatusSistemPanel';
 import PakanOtomatisPanel   from '../components/lele/PakanOtomatisPanel';
@@ -30,7 +31,15 @@ const PANELS = [
   { id: 'settings',  label: 'Pengaturan',       icon: SettingsIcon },
 ];
 
+// Tab inti dipakai harian (semua role yang bisa buka halaman ini: pekerja/
+// pengamat/pemilik/superadmin). Sisanya sembunyi dari pekerja/pengamat —
+// keluhan "kebanyakan menu, bikin pusing" dari peternak/pekerja lapangan.
+const CORE_PANEL_IDS = ['status', 'feedctl', 'biomass', 'pond'];
+
 export default function LeleFeeder() {
+  const { role } = useCan();
+  const showAdvancedTabs = role === 'pemilik' || role === 'superadmin';
+  const visiblePanels = showAdvancedTabs ? PANELS : PANELS.filter(p => CORE_PANEL_IDS.includes(p.id));
   const [mode, setMode] = useState('esp');       // 'esp' | 'manual'
   const [devices, setDevices] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -192,7 +201,7 @@ export default function LeleFeeder() {
 
                   {/* Tab navigation */}
                   <div className="tabs" style={{ marginBottom: 20, flexWrap: 'wrap' }}>
-                    {PANELS.map(p => {
+                    {visiblePanels.map(p => {
                       const Icon = p.icon;
                       return (
                         <button key={p.id}

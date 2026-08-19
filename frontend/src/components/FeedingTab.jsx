@@ -15,6 +15,7 @@ import PengaturanPanel from './lele/PengaturanPanel';
 import FeedControlSyncPanel from './lele/FeedControlSyncPanel';
 import MqttMonitorPanel from './lele/MqttMonitorPanel';
 import DataKolamPanel from './lele/DataKolamPanel';
+import { useCan } from '../context/AuthContext';
 
 const ESP_PANELS = [
   { id: 'plan',      label: 'Rencana Pakan',    icon: Clock },
@@ -28,6 +29,12 @@ const ESP_PANELS = [
   { id: 'settings',  label: 'Pengaturan',       icon: SettingsIcon },
 ];
 
+// Tab inti yang dipakai harian (semua role). Sisanya (jadwal onboard,
+// kalibrasi, riwayat, diagnostik, pengaturan device) jarang dipakai &
+// cuma relevan buat pemilik/superadmin — sembunyikan dari pekerja/pengamat
+// biar tak "pusing" lihat 9 tab (keluhan peternak).
+const CORE_PANEL_IDS = ['plan', 'status', 'feedctl', 'pond'];
+
 const DAYS = [
   { id: 1, label: 'S', name: 'Sen' }, { id: 2, label: 'S', name: 'Sel' },
   { id: 3, label: 'R', name: 'Rab' }, { id: 4, label: 'K', name: 'Kam' },
@@ -36,6 +43,9 @@ const DAYS = [
 ];
 
 export default function FeedingTab({ pondId }) {
+  const { role } = useCan();
+  const showAdvancedTabs = role === 'pemilik' || role === 'superadmin';
+  const visiblePanels = showAdvancedTabs ? ESP_PANELS : ESP_PANELS.filter(p => CORE_PANEL_IDS.includes(p.id));
   const [schedules, setSchedules] = useState([]);
   const [logs, setLogs] = useState([]);
   const [showSchModal, setShowSchModal] = useState(false);
@@ -130,7 +140,7 @@ export default function FeedingTab({ pondId }) {
             </div>
           )}
           <div className="tabs" style={{ marginBottom: 20, flexWrap: 'wrap' }}>
-            {ESP_PANELS.map(p => {
+            {visiblePanels.map(p => {
               const Icon = p.icon;
               return (
                 <button key={p.id}
