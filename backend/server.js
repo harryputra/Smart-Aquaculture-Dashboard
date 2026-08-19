@@ -175,13 +175,17 @@ async function forceCloseValve(pond_id, valveKind, reasonCode) {
 }
 
 async function checkValveAutoStop(pond_id, currentDepth) {
-  if (currentDepth == null || isNaN(parseFloat(currentDepth))) return;
-  const depth = parseFloat(currentDepth);
-  for (const valveKind of ['drain', 'inlet']) {
-    const watch = valveAutoStop[`${pond_id}:${valveKind}`];
-    if (!watch || (watch.mode !== 'depth_target' && watch.mode !== 'depth_percent')) continue;
-    const reached = valveKind === 'drain' ? depth <= watch.targetDepth : depth >= watch.targetDepth;
-    if (reached) await forceCloseValve(pond_id, valveKind, 'depth_reached');
+  try {
+    if (currentDepth == null || isNaN(parseFloat(currentDepth))) return;
+    const depth = parseFloat(currentDepth);
+    for (const valveKind of ['drain', 'inlet']) {
+      const watch = valveAutoStop[`${pond_id}:${valveKind}`];
+      if (!watch || (watch.mode !== 'depth_target' && watch.mode !== 'depth_percent')) continue;
+      const reached = valveKind === 'drain' ? depth <= watch.targetDepth : depth >= watch.targetDepth;
+      if (reached) await forceCloseValve(pond_id, valveKind, 'depth_reached');
+    }
+  } catch (e) {
+    console.error('Valve auto-stop check error:', e.message);
   }
 }
 
