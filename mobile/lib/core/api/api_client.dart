@@ -92,7 +92,7 @@ class ApiClient {
 
   // ── Quick Login ────────────────────────────────────────────────
 
-  Future<Map<String, dynamic>> getQuickLoginPublic(String token) async {
+  Future<Map<String, dynamic>> getQuickLoginPublic([String token = '']) async {
     return await _get('/quick-login/public', params: {'token': token});
   }
 

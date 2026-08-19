@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/auth/auth_provider.dart';
 import '../../core/api/api_client.dart';
+import '../../core/models/models.dart';
 import '../../core/theme/app_theme.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -15,13 +16,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
+  final _quickPassCtrl = TextEditingController();
   bool _loading = false;
   bool _showPass = false;
   String? _error;
 
-  // Quick Login state
+  // Quick Login state — diambil live dari backend (quick_login_config),
+  // bukan hardcoded. Tombol hanya muncul jika show_button_on_login aktif.
   List<dynamic> _quickAccounts = [];
-  bool _quickEnabled = false;
+  bool _quickShowButton = false;
+  bool _quickPassphraseRequired = false;
+  bool _quickBusy = false;
+  String? _quickError;
 
   @override
   void initState() {
@@ -32,9 +38,30 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Future<void> _loadQuickLogin() async {
     try {
       final api = ref.read(apiClientProvider);
-      // Try to get quick login config (token from URL is for web – mobile uses default endpoint)
-      // We'll check if there's a public quick-login endpoint
-    } catch (_) {}
+      final data = await api.getQuickLoginPublic();
+      if (!mounted) return;
+      setState(() {
+        _quickShowButton = data['show_button'] == true;
+        _quickPassphraseRequired = data['passphrase_required'] == true;
+        _quickAccounts = data['accounts'] ?? [];
+      });
+    } catch (_) {
+      // 404 saat fitur off, atau tidak ada koneksi — sembunyikan saja, jangan tampilkan error.
+    }
+  }
+
+  Future<void> _quickLoginAs(dynamic account) async {
+    setState(() { _quickBusy = true; _quickError = null; });
+    try {
+      await ref.read(authProvider.notifier).quickLogin({
+        'account': account['user_id'],
+        if (_quickPassphraseRequired) 'passphrase': _quickPassCtrl.text,
+      });
+    } catch (e) {
+      setState(() => _quickError = e.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _quickBusy = false);
+    }
   }
 
   Future<void> _login() async {
@@ -213,46 +240,59 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ),
                 ),
 
-                const SizedBox(height: 24),
-
-                // ── Quick Login Button ─────────────────────────────
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: AppTheme.bgCard.withOpacity(0.7),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: AppTheme.borderPrimary),
-                  ),
-                  child: Column(
-                    children: [
-                      Row(
-                        children: [
-                          const Icon(Icons.bolt, color: AppTheme.warning, size: 18),
-                          const SizedBox(width: 6),
-                          const Text(
-                            'Quick Login (Demo)',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: AppTheme.textPrimary,
+                // ── Quick Login (hanya muncul jika diaktifkan di server) ──
+                if (_quickShowButton && _quickAccounts.isNotEmpty) ...[
+                  const SizedBox(height: 24),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppTheme.bgCard.withOpacity(0.7),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppTheme.borderPrimary),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.bolt, color: AppTheme.warning, size: 18),
+                            const SizedBox(width: 6),
+                            const Text(
+                              'Quick Login (Demo)',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (_quickPassphraseRequired) ...[
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: _quickPassCtrl,
+                            obscureText: true,
+                            style: const TextStyle(color: AppTheme.textPrimary),
+                            decoration: const InputDecoration(
+                              labelText: 'Passphrase quick-login',
+                              isDense: true,
                             ),
                           ),
                         ],
-                      ),
-                      const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          _quickBtn('Super Admin', 'superadmin@aqua.id', 'admin123'),
-                          _quickBtn('Pemilik', 'pemilik@aqua.id', 'pemilik123'),
-                          _quickBtn('Pekerja', 'pekerja@aqua.id', 'pekerja123'),
-                          _quickBtn('Pengamat', 'pengamat@aqua.id', 'pengamat123'),
+                        if (_quickError != null) ...[
+                          const SizedBox(height: 10),
+                          Text(_quickError!, style: const TextStyle(color: AppTheme.danger, fontSize: 12)),
                         ],
-                      ),
-                    ],
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: _quickAccounts.map((acc) => _quickBtn(acc)).toList(),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
+                ],
 
                 const SizedBox(height: 40),
               ],
@@ -263,20 +303,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     );
   }
 
-  Widget _quickBtn(String label, String email, String password) {
+  Widget _quickBtn(dynamic account) {
+    final label = roleLabel[account['role']] ?? account['role'] ?? '?';
     return OutlinedButton(
-      onPressed: _loading
-          ? null
-          : () async {
-              setState(() { _loading = true; _error = null; });
-              try {
-                await ref.read(authProvider.notifier).login(email, password);
-              } catch (e) {
-                setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
-              } finally {
-                setState(() => _loading = false);
-              }
-            },
+      onPressed: _quickBusy ? null : () => _quickLoginAs(account),
       style: OutlinedButton.styleFrom(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         textStyle: const TextStyle(fontSize: 12),
@@ -291,6 +321,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   void dispose() {
     _emailCtrl.dispose();
     _passCtrl.dispose();
+    _quickPassCtrl.dispose();
     super.dispose();
   }
 }
