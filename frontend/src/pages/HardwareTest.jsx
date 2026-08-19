@@ -18,7 +18,16 @@ export default function HardwareTest() {
   const [pingMsg, setPingMsg] = useState('');
 
   async function load() {
-    try { const r = await getLeleDevices(); setDevices(r); if (r.length && !sel) setSel(r[0].device_id); } catch (e) { /* */ }
+    try {
+      const r = await getLeleDevices();
+      setDevices(r);
+      // Jangan pakai `sel` dari closure (basi karena polling tiap 2 dtk);
+      // functional update agar pilihan device oleh user tak ter-reset ke device[0].
+      setSel(prev => {
+        if (prev && r.some(d => d.device_id === prev)) return prev;
+        return r.length ? r[0].device_id : null;
+      });
+    } catch (e) { /* */ }
   }
   async function loadResults(id) {
     try { const r = await getCommissioning(id); const m = {}; r.forEach(x => { m[x.test_key] = x; }); setResults(m); } catch (e) { /* */ }
