@@ -128,6 +128,62 @@ const influxWrite = influxDB.getWriteApi(
 const latestData = {};
 const drainStates = {}; // { pond_id: { draining: bool, refilling: bool, startTime: Date } }
 
+// Auto-stop katup manual (Kontrol Air). Key: `${pond_id}:${valveKind}`,
+// valveKind = 'drain' | 'inlet'. Timer di sini, bukan di firmware — pola
+// sama seperti drainStates/triggerAutoDrainCycle di atas.
+const valveAutoStop = {};
+const VALVE_SAFETY_CAP_MS = 15 * 60 * 1000; // batas pengaman keras, berlaku di SEMUA mode
+
+function valveTopic(farm_id, pond_id) {
+  return `aquaculture/${farm_id}/${pond_id}/control`;
+}
+
+function clearValveWatch(pond_id, valveKind) {
+  const key = `${pond_id}:${valveKind}`;
+  const watch = valveAutoStop[key];
+  if (!watch) return;
+  clearTimeout(watch.safetyTimer);
+  if (watch.durationTimer) clearTimeout(watch.durationTimer);
+  delete valveAutoStop[key];
+}
+
+async function forceCloseValve(pond_id, valveKind, reasonCode) {
+  const key = `${pond_id}:${valveKind}`;
+  const watch = valveAutoStop[key];
+  clearValveWatch(pond_id, valveKind);
+
+  const p = await pool.query(`SELECT farm_id FROM ponds WHERE pond_id = $1`, [pond_id]);
+  const farm_id = p.rows[0]?.farm_id;
+  if (!farm_id) return;
+
+  const command = valveKind === 'drain' ? 'close_valve' : 'close_inlet';
+  mqttClient.publish(valveTopic(farm_id, pond_id), JSON.stringify({ command, source: 'auto' }));
+
+  const REASON_TEXT = {
+    depth_reached: () => `Auto-stop: ketinggian target ${Number(watch?.targetDepth).toFixed(1)}cm tercapai`,
+    duration: () => `Auto-stop: durasi ${watch?.durationMinutes} menit habis`,
+    safety_cap: () => `Auto-stop: batas pengaman 15 menit tercapai (kondisi target tak tercapai)`,
+  };
+  const reason = (REASON_TEXT[reasonCode] || (() => 'Auto-stop'))();
+  const action = valveKind === 'drain' ? 'valve_close' : 'inlet_close';
+
+  await pool.query(
+    `INSERT INTO control_logs (pond_id, action, triggered_by, reason) VALUES ($1, $2, 'auto', $3)`,
+    [pond_id, action, reason]
+  );
+}
+
+async function checkValveAutoStop(pond_id, currentDepth) {
+  if (currentDepth == null || isNaN(parseFloat(currentDepth))) return;
+  const depth = parseFloat(currentDepth);
+  for (const valveKind of ['drain', 'inlet']) {
+    const watch = valveAutoStop[`${pond_id}:${valveKind}`];
+    if (!watch || (watch.mode !== 'depth_target' && watch.mode !== 'depth_percent')) continue;
+    const reached = valveKind === 'drain' ? depth <= watch.targetDepth : depth >= watch.targetDepth;
+    if (reached) await forceCloseValve(pond_id, valveKind, 'depth_reached');
+  }
+}
+
 // ============================
 // MQTT Message Handler
 // ============================
