@@ -93,8 +93,12 @@ export const getLatestSensor = (pondId) => req(`/sensors/${pondId}/latest`);
 export const getSensorHistory = (pondId, limit = 50) => req(`/sensors/${pondId}/history?limit=${limit}`);
 
 // Control
-export const controlValve = (pondId, command, source = 'manual') =>
-  req(`/control/${pondId}/valve`, { method: 'POST', body: { command, source } });
+export const controlValve = (pondId, command, source = 'manual', autoStop = null) =>
+  req(`/control/${pondId}/valve`, {
+    method: 'POST',
+    body: { command, source, ...(autoStop ? { auto_stop: autoStop } : {}) },
+  });
+export const getValveStatus = (pondId) => req(`/control/${pondId}/valve-status`);
 export const triggerDrainCycle = (pondId) =>
   req(`/control/${pondId}/drain-cycle`, { method: 'POST' });
 export const getWaterDevices = () => req('/water-devices');
