@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Droplets, Waves, RefreshCw, Activity,
   Thermometer, Ruler, Droplet, Eye, Beaker, Timer,
@@ -68,6 +68,11 @@ export default function ControlTab({ pond, onChange }) {
     inlet: { mode: 'manual', value: '' },
   });
   const latest = pond.latest_sensor || {};
+  // Ref selalu menunjuk ke loadStatus milik efek polling yang sedang aktif,
+  // supaya valve() bisa memicu refresh instan tanpa merusak guard `active`
+  // (loadStatus tetap didefinisikan di dalam useEffect agar closure `active`
+  // per-invocation tetap benar saat pond_id berganti / komponen unmount).
+  const loadStatusRef = useRef(async () => {});
 
   useEffect(() => {
     let active = true;
@@ -77,6 +82,7 @@ export default function ControlTab({ pond, onChange }) {
         if (active) setStatus(s);
       } catch (e) { /* diamkan, badge tetap tampilkan status terakhir yg diketahui */ }
     }
+    loadStatusRef.current = loadStatus;
     loadStatus();
     const t = setInterval(loadStatus, 3000);
     return () => { active = false; clearInterval(t); };
@@ -91,6 +97,10 @@ export default function ControlTab({ pond, onChange }) {
         ? { mode: as.mode, value: parseFloat(as.value) }
         : null;
       await controlValve(pond.pond_id, cmd, 'manual', payload);
+      // Refresh status segera (bukan menunggu interval 3s berikutnya) supaya
+      // tombol Buka/Tutup langsung mencerminkan state terbaru — mencegah
+      // klik ganda memicu ulang auto-stop watch di server (reset timer/cap).
+      await loadStatusRef.current();
       setTimeout(() => { onChange(); }, 500);
     } catch (e) { alert('Gagal: ' + e.message); }
     setBusy(false);
