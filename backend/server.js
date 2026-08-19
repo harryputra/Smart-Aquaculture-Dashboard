@@ -705,6 +705,46 @@ const VALVE_KIND_BY_COMMAND = {
   open_inlet: 'inlet', close_inlet: 'inlet',
 };
 
+const AUTO_STOP_MODES = ['duration', 'depth_target', 'depth_percent'];
+
+// Perhitungan MURNI, tanpa efek samping — dipanggil SEBELUM kita boleh
+// menyentuh watch auto-stop yang lama. Return null kalau input tak bisa
+// dihitung (mis. mode depth_percent tapi belum ada latestData.depth, atau
+// auto_stop.value bukan angka), supaya caller tahu jangan destroy watch lama
+// demi watch baru yang gagal dibentuk.
+function computeAutoStopPlan(auto_stop, valveKind, pond_id) {
+  if (!auto_stop || !AUTO_STOP_MODES.includes(auto_stop.mode)) return null;
+
+  if (auto_stop.mode === 'depth_target') {
+    const targetDepth = parseFloat(auto_stop.value);
+    if (isNaN(targetDepth)) return null;
+    return {
+      mode: 'depth_target', targetDepth, durationMinutes: null,
+      reason: `Auto-stop: target ketinggian ${targetDepth.toFixed(1)}cm`,
+    };
+  }
+
+  if (auto_stop.mode === 'depth_percent') {
+    const startDepth = parseFloat(latestData[pond_id]?.depth);
+    const percent = parseFloat(auto_stop.value);
+    if (isNaN(startDepth) || isNaN(percent)) return null;
+    const targetDepth = valveKind === 'drain'
+      ? startDepth * (1 - percent / 100)
+      : startDepth * (1 + percent / 100);
+    return {
+      mode: 'depth_percent', targetDepth, durationMinutes: null,
+      reason: `Auto-stop: ${percent}% perubahan dari ${startDepth.toFixed(1)}cm (target ${targetDepth.toFixed(1)}cm)`,
+    };
+  }
+
+  // duration
+  const durationMinutes = Math.min(15, Math.max(1, parseFloat(auto_stop.value) || 1));
+  return {
+    mode: 'duration', targetDepth: null, durationMinutes,
+    reason: `Auto-stop: durasi ${durationMinutes} menit`,
+  };
+}
+
 app.post('/api/control/:pondId/valve', requirePondAccess('pondId'), async (req, res) => {
   try {
     const { command, source = 'manual', auto_stop } = req.body;
@@ -728,45 +768,45 @@ app.post('/api/control/:pondId/valve', requirePondAccess('pondId'), async (req, 
                    command === 'close_inlet' ? 'inlet_close' : command;
 
     let reason = 'Kontrol manual';
+    let auto_stop_armed = false;
 
-    if (isOpenCommand && valveKind && auto_stop &&
-        ['duration', 'depth_target', 'depth_percent'].includes(auto_stop.mode)) {
-      clearValveWatch(pond_id, valveKind); // bersihkan watch lama valve ini kalau ada
+    if (isOpenCommand && valveKind && auto_stop && AUTO_STOP_MODES.includes(auto_stop.mode)) {
+      const plan = computeAutoStopPlan(auto_stop, valveKind, pond_id);
 
-      let targetDepth = null;
-      let durationMinutes = null;
+      if (plan) {
+        // Baru sentuh/hapus watch lama SETELAH kita tahu watch baru valid --
+        // jangan pernah destroy proteksi lama demi proteksi baru yang gagal
+        // dihitung (itu tepatnya bug "auto-stop gagal -> katup terbuka tanpa
+        // proteksi sama sekali" yang harus dicegah).
+        clearValveWatch(pond_id, valveKind);
 
-      if (auto_stop.mode === 'depth_target') {
-        targetDepth = parseFloat(auto_stop.value);
-        if (!isNaN(targetDepth)) reason = `Auto-stop: target ketinggian ${targetDepth.toFixed(1)}cm`;
-      } else if (auto_stop.mode === 'depth_percent') {
-        const startDepth = parseFloat(latestData[pond_id]?.depth);
-        const percent = parseFloat(auto_stop.value);
-        if (!isNaN(startDepth) && !isNaN(percent)) {
-          targetDepth = valveKind === 'drain'
-            ? startDepth * (1 - percent / 100)
-            : startDepth * (1 + percent / 100);
-          reason = `Auto-stop: ${percent}% perubahan dari ${startDepth.toFixed(1)}cm (target ${targetDepth.toFixed(1)}cm)`;
-        }
-      } else if (auto_stop.mode === 'duration') {
-        durationMinutes = Math.min(15, Math.max(1, parseFloat(auto_stop.value) || 1));
-        reason = `Auto-stop: durasi ${durationMinutes} menit`;
-      }
-
-      // Hanya pasang watch kalau targetDepth/durationMinutes berhasil dihitung.
-      if (targetDepth != null || durationMinutes != null) {
         const watch = {
-          mode: auto_stop.mode,
-          targetDepth,
-          durationMinutes,
+          mode: plan.mode,
+          targetDepth: plan.targetDepth,
+          durationMinutes: plan.durationMinutes,
           startedAt: new Date(),
-          safetyTimer: setTimeout(() => forceCloseValve(pond_id, valveKind, 'safety_cap'), VALVE_SAFETY_CAP_MS),
+          safetyTimer: setTimeout(
+            () => forceCloseValve(pond_id, valveKind, 'safety_cap')
+              .catch(err => console.error('forceCloseValve (safety_cap) failed:', err.message)),
+            VALVE_SAFETY_CAP_MS
+          ),
           durationTimer: null,
         };
-        if (auto_stop.mode === 'duration') {
-          watch.durationTimer = setTimeout(() => forceCloseValve(pond_id, valveKind, 'duration'), durationMinutes * 60 * 1000);
+        if (plan.mode === 'duration') {
+          watch.durationTimer = setTimeout(
+            () => forceCloseValve(pond_id, valveKind, 'duration')
+              .catch(err => console.error('forceCloseValve (duration) failed:', err.message)),
+            plan.durationMinutes * 60 * 1000
+          );
         }
         valveAutoStop[`${pond_id}:${valveKind}`] = watch;
+        reason = plan.reason;
+        auto_stop_armed = true;
+      } else {
+        // Mode dikenali tapi gagal dihitung -- JANGAN sentuh watch lama, dan
+        // buat kegagalannya terlihat jelas di log + response (bukan diam-diam
+        // jadi "Kontrol manual" biasa seolah semua baik-baik saja).
+        reason = `Auto-stop diminta (${auto_stop.mode}) tapi gagal dihitung — katup dibuka TANPA proteksi auto-stop`;
       }
     }
 
@@ -774,7 +814,7 @@ app.post('/api/control/:pondId/valve', requirePondAccess('pondId'), async (req, 
       `INSERT INTO control_logs (pond_id, action, triggered_by, reason) VALUES ($1, $2, $3, $4)`,
       [pond_id, action, source, reason]
     );
-    res.json({ success: true });
+    res.json({ success: true, auto_stop_armed });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
