@@ -830,6 +830,42 @@ app.post('/api/control/:pondId/drain-cycle', requirePondAccess('pondId'), async 
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/control/:pondId/valve-status', requirePondAccess('pondId'), async (req, res) => {
+  try {
+    const pond_id = req.params.pondId;
+    const r = await pool.query(
+      `SELECT DISTINCT ON (action) action, reason, timestamp
+       FROM control_logs
+       WHERE pond_id = $1 AND action IN ('valve_open','valve_close','inlet_open','inlet_close')
+       ORDER BY action, timestamp DESC`,
+      [pond_id]
+    );
+    const rows = {};
+    r.rows.forEach(row => { rows[row.action] = row; });
+
+    function valveInfo(openAction, closeAction, valveKind) {
+      const openRow = rows[openAction];
+      const closeRow = rows[closeAction];
+      const isOpen = !!openRow && (!closeRow || new Date(openRow.timestamp) > new Date(closeRow.timestamp));
+      const latestRow = isOpen ? openRow : (closeRow || openRow);
+      const watch = valveAutoStop[`${pond_id}:${valveKind}`];
+      return {
+        open: isOpen,
+        reason: latestRow?.reason || null,
+        since: latestRow?.timestamp || null,
+        auto_stop_active: !!watch,
+        auto_stop_mode: watch?.mode || null,
+        auto_stop_target: watch ? (watch.mode === 'duration' ? watch.durationMinutes : watch.targetDepth) : null,
+      };
+    }
+
+    res.json({
+      drain: valveInfo('valve_open', 'valve_close', 'drain'),
+      inlet: valveInfo('inlet_open', 'inlet_close', 'inlet'),
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ---- Aerator (kendali DO) per kolam ----
 app.get('/api/aerator/:pondId', requirePondAccess('pondId'), async (req, res) => {
   try {
