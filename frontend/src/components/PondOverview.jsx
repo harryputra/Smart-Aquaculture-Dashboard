@@ -4,9 +4,11 @@ import { getPondOverview } from '../services/api';
 
 const CSS = `
 .pov-grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));margin-bottom:14px;}
-.pov-card{text-align:left;background:var(--bg-elevated,#fff);border:1px solid var(--border-primary,#e2e8f0);
-  border-radius:14px;padding:14px 15px;cursor:pointer;transition:border-color .16s,box-shadow .16s,transform .16s;}
+.pov-card{display:block;width:100%;font:inherit;text-align:left;background:var(--bg-elevated,#fff);border:1px solid var(--border-primary,#e2e8f0);
+  border-radius:14px;padding:14px 15px;cursor:pointer;transition:border-color .16s,box-shadow .16s,transform .16s;-webkit-tap-highlight-color:transparent;}
 .pov-card:hover{border-color:#22c3dd;box-shadow:0 8px 20px rgba(6,182,212,.12);transform:translateY(-1px);}
+.pov-card:active{transform:translateY(0) scale(.99);}
+.pov-card:focus-visible{outline:2px solid #06b6d4;outline-offset:2px;}
 .pov-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
 .pov-titl{display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;color:var(--text-secondary,#475569);
   text-transform:uppercase;letter-spacing:.04em;}
@@ -64,7 +66,7 @@ export default function PondOverview({ pondId, onGoTab }) {
       <div className="pov-grid">
 
         {/* Kualitas Air */}
-        <div className="pov-card" onClick={() => onGoTab('monitor')}>
+        <button type="button" className="pov-card" onClick={() => onGoTab('monitor')}>
           <div className="pov-head">
             <div className="pov-titl"><span className="pov-ico" style={{ background: '#e0f2fe', color: '#0369a1' }}><Droplet size={16} /></span> Kualitas Air</div>
             <span className="pov-more">Monitor <ChevronRight size={13} /></span>
@@ -83,10 +85,10 @@ export default function PondOverview({ pondId, onGoTab }) {
               </div>
             </>
           ) : <div className="pov-muted">Belum ada data sensor (Mode Dummy).</div>}
-        </div>
+        </button>
 
         {/* Pakan Hari Ini */}
-        <div className="pov-card" onClick={() => onGoTab('feeding')}>
+        <button type="button" className="pov-card" onClick={() => onGoTab('feeding')}>
           <div className="pov-head">
             <div className="pov-titl"><span className="pov-ico" style={{ background: '#fef3c7', color: '#92400e' }}><Utensils size={16} /></span> Pakan Hari Ini</div>
             <span className="pov-more">Pakan <ChevronRight size={13} /></span>
@@ -114,10 +116,10 @@ export default function PondOverview({ pondId, onGoTab }) {
               )}
             </>
           )}
-        </div>
+        </button>
 
         {/* Kematian & SR */}
-        <div className="pov-card" onClick={() => onGoTab('mortality')}>
+        <button type="button" className="pov-card" onClick={() => onGoTab('mortality')}>
           <div className="pov-head">
             <div className="pov-titl"><span className="pov-ico" style={{ background: '#fee2e2', color: '#b91c1c' }}><Skull size={16} /></span> Kematian & SR</div>
             <span className="pov-more">Kematian <ChevronRight size={13} /></span>
@@ -128,10 +130,10 @@ export default function PondOverview({ pondId, onGoTab }) {
               <div className="pov-muted" style={{ marginTop: 3 }}>Mati {c.deaths} ekor · hidup {c.population} / {c.initial_stock}</div>
             </>
           ) : <div className="pov-muted">Belum ada siklus aktif.</div>}
-        </div>
+        </button>
 
         {/* Keuangan */}
-        <div className="pov-card" onClick={() => onGoTab('financial')}>
+        <button type="button" className="pov-card" onClick={() => onGoTab('financial')}>
           <div className="pov-head">
             <div className="pov-titl"><span className="pov-ico" style={{ background: '#dcfce7', color: '#15803d' }}><Wallet size={16} /></span> Keuangan</div>
             <span className="pov-more">Keuangan <ChevronRight size={13} /></span>
@@ -145,7 +147,7 @@ export default function PondOverview({ pondId, onGoTab }) {
               <div className="pov-row"><span className="pov-muted">Operasional</span><span>{rp(m.op_cost)}</span></div>
             </>
           ) : <div className="pov-muted">Belum ada siklus aktif.</div>}
-        </div>
+        </button>
 
       </div>
     </div>
