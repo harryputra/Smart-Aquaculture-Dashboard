@@ -6,7 +6,7 @@ class AppConfig {
   // Base URL backend – bisa di-override via environment
   static const String baseUrl = String.fromEnvironment(
     'BASE_URL',
-    defaultValue: 'https://aquaculture.trin-polman.id/api',
+    defaultValue: 'https://sipakale.um-km.id/api',
   );
 
   static const String appName = 'AquaSmart';
@@ -26,7 +26,7 @@ class AppConfig {
   // Grafana embedded URL
   static const String grafanaUrl = String.fromEnvironment(
     'GRAFANA_URL',
-    defaultValue: 'https://aquaculture.trin-polman.id/grafana',
+    defaultValue: 'https://sipakale.um-km.id/grafana',
   );
 
   // Polling intervals
