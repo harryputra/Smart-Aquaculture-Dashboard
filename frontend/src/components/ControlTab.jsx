@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Droplets, Waves, RefreshCw, Activity,
-  Thermometer, Ruler, Droplet, Eye, Beaker,
+  Thermometer, Ruler, Droplet, Eye, Beaker, Timer,
 } from 'lucide-react';
-import { controlValve, triggerDrainCycle } from '../services/api';
+import { controlValve, triggerDrainCycle, getValveStatus } from '../services/api';
 import AeratorControl from './AeratorControl';
 
 const SENSOR_META = {
@@ -14,19 +14,84 @@ const SENSOR_META = {
   ph: { name: 'pH', icon: Beaker, unit: '', color: '#8b5cf6' },
 };
 
+const AUTO_STOP_MODE_META = {
+  manual: { label: 'Manual (tanpa auto-stop)' },
+  duration: { label: 'Durasi (menit)', placeholder: 'mis. 5', hint: 'Maks 15 menit — di atas itu otomatis dipotong.' },
+  depth_target: { label: 'Target ketinggian (cm)', placeholder: 'mis. 48' },
+  depth_percent: { label: 'Persentase perubahan (%)', placeholder: 'mis. 20', hint: null },
+};
+
+function AutoStopPicker({ kind, value, onChange, disabled }) {
+  const percentHint = kind === 'drain'
+    ? 'Berhenti saat air TURUN sekian % dari level saat tombol Buka ditekan.'
+    : 'Berhenti saat air NAIK sekian % dari level saat tombol Buka ditekan.';
+  return (
+    <div style={{ marginBottom: 14, textAlign: 'left' }}>
+      <label className="form-label" style={{ fontSize: 12 }}>Auto-stop</label>
+      <select
+        className="form-select"
+        value={value.mode}
+        disabled={disabled}
+        onChange={e => onChange({ mode: e.target.value, value: '' })}
+        style={{ marginBottom: value.mode !== 'manual' ? 6 : 0 }}
+      >
+        {Object.entries(AUTO_STOP_MODE_META).map(([k, m]) => (
+          <option key={k} value={k}>{m.label}</option>
+        ))}
+      </select>
+      {value.mode !== 'manual' && (
+        <>
+          <input
+            className="form-input"
+            type="number"
+            min="0"
+            step="0.1"
+            disabled={disabled}
+            placeholder={AUTO_STOP_MODE_META[value.mode].placeholder}
+            value={value.value}
+            onChange={e => onChange({ ...value, value: e.target.value })}
+          />
+          <div className="text-xs text-muted" style={{ marginTop: 2 }}>
+            {value.mode === 'depth_percent' ? percentHint : AUTO_STOP_MODE_META[value.mode].hint}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function ControlTab({ pond, onChange }) {
-  const [drainOpen, setDrainOpen] = useState(false);
-  const [inletOpen, setInletOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState({ drain: {}, inlet: {} });
+  const [autoStop, setAutoStop] = useState({
+    drain: { mode: 'manual', value: '' },
+    inlet: { mode: 'manual', value: '' },
+  });
   const latest = pond.latest_sensor || {};
+
+  useEffect(() => {
+    let active = true;
+    async function loadStatus() {
+      try {
+        const s = await getValveStatus(pond.pond_id);
+        if (active) setStatus(s);
+      } catch (e) { /* diamkan, badge tetap tampilkan status terakhir yg diketahui */ }
+    }
+    loadStatus();
+    const t = setInterval(loadStatus, 3000);
+    return () => { active = false; clearInterval(t); };
+  }, [pond.pond_id]);
 
   async function valve(cmd, kind) {
     setBusy(true);
     try {
-      await controlValve(pond.pond_id, cmd);
-      if (kind === 'drain') setDrainOpen(cmd === 'open_valve');
-      else setInletOpen(cmd === 'open_inlet');
-      setTimeout(onChange, 500);
+      const isOpenCmd = cmd === 'open_valve' || cmd === 'open_inlet';
+      const as = autoStop[kind];
+      const payload = isOpenCmd && as.mode !== 'manual' && as.value !== ''
+        ? { mode: as.mode, value: parseFloat(as.value) }
+        : null;
+      await controlValve(pond.pond_id, cmd, 'manual', payload);
+      setTimeout(() => { onChange(); }, 500);
     } catch (e) { alert('Gagal: ' + e.message); }
     setBusy(false);
   }
@@ -46,13 +111,27 @@ export default function ControlTab({ pond, onChange }) {
     setBusy(false);
   }
 
+  const drainOpen = !!status.drain.open;
+  const inletOpen = !!status.inlet.open;
+
   return (
     <>
       <div className="alert alert-info">
         <Activity size={18} />
         <div>
           <strong>Kontrol Kolam.</strong> Tersedia 2 katup: <strong>Pengurasan</strong> (membuang air kotor)
-          dan <strong>Pengisian</strong> (mengisi air bersih). Anda bisa kontrol manual per katup, atau jalankan siklus otomatis.
+          dan <strong>Pengisian</strong> (mengisi air bersih). Anda bisa kontrol manual per katup, atur
+          auto-stop, atau jalankan siklus otomatis.
+        </div>
+      </div>
+
+      <div className="card mb-6" style={{ textAlign: 'center', padding: '18px 20px' }}>
+        <div className="text-xs text-muted" style={{ textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+          Ketinggian Air Saat Ini
+        </div>
+        <div style={{ fontSize: 32, fontWeight: 800 }}>
+          {latest.depth != null ? parseFloat(latest.depth).toFixed(1) : '--'}
+          <span style={{ fontSize: 16, fontWeight: 500, color: 'var(--text-tertiary)', marginLeft: 6 }}>cm</span>
         </div>
       </div>
 
@@ -70,9 +149,19 @@ export default function ControlTab({ pond, onChange }) {
             <Droplets size={48} />
           </div>
           <div className="valve-status-text">{drainOpen ? 'Mengalir Keluar' : 'Tertutup'}</div>
-          <p className="text-sm text-muted" style={{ marginBottom: 16 }}>
+          <p className="text-sm text-muted" style={{ marginBottom: 8 }}>
             Membuang air dari kolam
           </p>
+          {status.drain.reason && (
+            <p className="text-xs text-muted" style={{ marginBottom: 8 }}>{status.drain.reason}</p>
+          )}
+          {status.drain.auto_stop_active && (
+            <p className="text-xs" style={{ color: 'var(--accent-primary)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
+              <Timer size={12} /> Auto-stop aktif ({status.drain.auto_stop_mode})
+            </p>
+          )}
+          <AutoStopPicker kind="drain" value={autoStop.drain} disabled={busy || drainOpen}
+            onChange={v => setAutoStop(s => ({ ...s, drain: v }))} />
           <div className="flex gap-2" style={{ justifyContent: 'center' }}>
             <button
               className="btn btn-success"
@@ -104,9 +193,19 @@ export default function ControlTab({ pond, onChange }) {
             <Waves size={48} />
           </div>
           <div className="valve-status-text">{inletOpen ? 'Mengalir Masuk' : 'Tertutup'}</div>
-          <p className="text-sm text-muted" style={{ marginBottom: 16 }}>
+          <p className="text-sm text-muted" style={{ marginBottom: 8 }}>
             Mengisi air bersih ke kolam
           </p>
+          {status.inlet.reason && (
+            <p className="text-xs text-muted" style={{ marginBottom: 8 }}>{status.inlet.reason}</p>
+          )}
+          {status.inlet.auto_stop_active && (
+            <p className="text-xs" style={{ color: 'var(--accent-primary)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
+              <Timer size={12} /> Auto-stop aktif ({status.inlet.auto_stop_mode})
+            </p>
+          )}
+          <AutoStopPicker kind="inlet" value={autoStop.inlet} disabled={busy || inletOpen}
+            onChange={v => setAutoStop(s => ({ ...s, inlet: v }))} />
           <div className="flex gap-2" style={{ justifyContent: 'center' }}>
             <button
               className="btn btn-success"
