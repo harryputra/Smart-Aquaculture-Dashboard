@@ -6,19 +6,19 @@ class AppConfig {
   // Base URL backend – bisa di-override via environment
   static const String baseUrl = String.fromEnvironment(
     'BASE_URL',
-    defaultValue: 'https://lele.um-km.id/api',
+    defaultValue: 'https://aquaculture.trin-polman.id/api',
   );
 
   static const String appName = 'AquaSmart';
   static const String appVersion = '1.0.0';
 
-  // MQTT config (broker sama yang dipakai ESP32)
+  // MQTT config (broker sama yang dipakai ESP32 — lihat Parameter.h firmware)
   static const String mqttHost = String.fromEnvironment(
     'MQTT_HOST',
-    defaultValue: 'lele.um-km.id',
+    defaultValue: 'mqtt.trin-polman.id',
   );
   static const int mqttPort = int.fromEnvironment('MQTT_PORT', defaultValue: 443);
-  static const String mqttPath = String.fromEnvironment('MQTT_PATH', defaultValue: '/mqtt');
+  static const String mqttPath = String.fromEnvironment('MQTT_PATH', defaultValue: '/');
   static const String mqttUser = String.fromEnvironment('MQTT_USER', defaultValue: 'aquaculture');
   static const String mqttPassword =
       String.fromEnvironment('MQTT_PASSWORD', defaultValue: 'aquaculture123');
@@ -26,7 +26,7 @@ class AppConfig {
   // Grafana embedded URL
   static const String grafanaUrl = String.fromEnvironment(
     'GRAFANA_URL',
-    defaultValue: 'https://lele.um-km.id/grafana',
+    defaultValue: 'https://aquaculture.trin-polman.id/grafana',
   );
 
   // Polling intervals
