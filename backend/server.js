@@ -700,25 +700,79 @@ app.get('/api/sensors/:pondId/history', requirePondAccess('pondId'), async (req,
 });
 
 // ----- Control -----
+const VALVE_KIND_BY_COMMAND = {
+  open_valve: 'drain', close_valve: 'drain',
+  open_inlet: 'inlet', close_inlet: 'inlet',
+};
+
 app.post('/api/control/:pondId/valve', requirePondAccess('pondId'), async (req, res) => {
   try {
-    const { command, source = 'manual' } = req.body;
-    const p = await pool.query(`SELECT farm_id FROM ponds WHERE pond_id = $1`, [req.params.pondId]);
+    const { command, source = 'manual', auto_stop } = req.body;
+    const pond_id = req.params.pondId;
+    const p = await pool.query(`SELECT farm_id FROM ponds WHERE pond_id = $1`, [pond_id]);
     if (!p.rows.length) return res.status(404).json({ error: 'Pond not found' });
+    const farm_id = p.rows[0].farm_id;
 
-    mqttClient.publish(
-      `aquaculture/${p.rows[0].farm_id}/${req.params.pondId}/control`,
-      JSON.stringify({ command, source })
-    );
+    const valveKind = VALVE_KIND_BY_COMMAND[command];
+    const isOpenCommand = command === 'open_valve' || command === 'open_inlet';
+
+    // Perintah tutup (manual atau lainnya) -> batalkan watch auto-stop yang
+    // sedang aktif utk valve ini, supaya timer lama tak kirim close ganda.
+    if (!isOpenCommand && valveKind) clearValveWatch(pond_id, valveKind);
+
+    mqttClient.publish(valveTopic(farm_id, pond_id), JSON.stringify({ command, source }));
 
     const action = command === 'open_valve' ? 'valve_open' :
                    command === 'close_valve' ? 'valve_close' :
                    command === 'open_inlet' ? 'inlet_open' :
                    command === 'close_inlet' ? 'inlet_close' : command;
 
+    let reason = 'Kontrol manual';
+
+    if (isOpenCommand && valveKind && auto_stop &&
+        ['duration', 'depth_target', 'depth_percent'].includes(auto_stop.mode)) {
+      clearValveWatch(pond_id, valveKind); // bersihkan watch lama valve ini kalau ada
+
+      let targetDepth = null;
+      let durationMinutes = null;
+
+      if (auto_stop.mode === 'depth_target') {
+        targetDepth = parseFloat(auto_stop.value);
+        if (!isNaN(targetDepth)) reason = `Auto-stop: target ketinggian ${targetDepth.toFixed(1)}cm`;
+      } else if (auto_stop.mode === 'depth_percent') {
+        const startDepth = parseFloat(latestData[pond_id]?.depth);
+        const percent = parseFloat(auto_stop.value);
+        if (!isNaN(startDepth) && !isNaN(percent)) {
+          targetDepth = valveKind === 'drain'
+            ? startDepth * (1 - percent / 100)
+            : startDepth * (1 + percent / 100);
+          reason = `Auto-stop: ${percent}% perubahan dari ${startDepth.toFixed(1)}cm (target ${targetDepth.toFixed(1)}cm)`;
+        }
+      } else if (auto_stop.mode === 'duration') {
+        durationMinutes = Math.min(15, Math.max(1, parseFloat(auto_stop.value) || 1));
+        reason = `Auto-stop: durasi ${durationMinutes} menit`;
+      }
+
+      // Hanya pasang watch kalau targetDepth/durationMinutes berhasil dihitung.
+      if (targetDepth != null || durationMinutes != null) {
+        const watch = {
+          mode: auto_stop.mode,
+          targetDepth,
+          durationMinutes,
+          startedAt: new Date(),
+          safetyTimer: setTimeout(() => forceCloseValve(pond_id, valveKind, 'safety_cap'), VALVE_SAFETY_CAP_MS),
+          durationTimer: null,
+        };
+        if (auto_stop.mode === 'duration') {
+          watch.durationTimer = setTimeout(() => forceCloseValve(pond_id, valveKind, 'duration'), durationMinutes * 60 * 1000);
+        }
+        valveAutoStop[`${pond_id}:${valveKind}`] = watch;
+      }
+    }
+
     await pool.query(
-      `INSERT INTO control_logs (pond_id, action, triggered_by, reason) VALUES ($1, $2, $3, 'Kontrol manual')`,
-      [req.params.pondId, action, source]
+      `INSERT INTO control_logs (pond_id, action, triggered_by, reason) VALUES ($1, $2, $3, $4)`,
+      [pond_id, action, source, reason]
     );
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
