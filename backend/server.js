@@ -1110,16 +1110,26 @@ app.post('/api/feeding-logs', requireRole('pekerja', 'pemilik'), async (req, res
       ts = parsed;
     }
 
+    // Sertakan cycle_id siklus aktif agar pakan manual ikut terhitung di
+    // "Total Pakan"/FCR siklus (cycleMetrics di cycle-management.js memfilter
+    // WHERE cycle_id, bukan rentang tanggal). Pola sama seperti yang sudah
+    // dipakai di lele-integration.js utk sesi pakan dari feeder — endpoint
+    // ini sebelumnya TIDAK menyertakan cycle_id sama sekali (bug lama,
+    // independen dari fitur timestamp mundur di atas).
+    const cyc = (await pool.query(
+      `SELECT cycle_id FROM pond_cycles WHERE pond_id=$1 AND status='active' ORDER BY start_date DESC LIMIT 1`,
+      [pond_id])).rows[0]?.cycle_id || null;
+
     const r = ts
       ? await pool.query(
-          `INSERT INTO feeding_logs (pond_id, feed_amount_kg, feed_type, triggered_by, note, timestamp)
-           VALUES ($1,$2,$3,'manual',$4,$5) RETURNING *`,
-          [pond_id, feed_amount_kg, feed_type, note, ts]
+          `INSERT INTO feeding_logs (pond_id, cycle_id, feed_amount_kg, feed_type, triggered_by, note, timestamp)
+           VALUES ($1,$2,$3,$4,'manual',$5,$6) RETURNING *`,
+          [pond_id, cyc, feed_amount_kg, feed_type, note, ts]
         )
       : await pool.query(
-          `INSERT INTO feeding_logs (pond_id, feed_amount_kg, feed_type, triggered_by, note)
-           VALUES ($1,$2,$3,'manual',$4) RETURNING *`,
-          [pond_id, feed_amount_kg, feed_type, note]
+          `INSERT INTO feeding_logs (pond_id, cycle_id, feed_amount_kg, feed_type, triggered_by, note)
+           VALUES ($1,$2,$3,$4,'manual',$5) RETURNING *`,
+          [pond_id, cyc, feed_amount_kg, feed_type, note]
         );
 
     // Entri tanggal-mundur bukan kejadian yang baru saja terjadi — jangan
