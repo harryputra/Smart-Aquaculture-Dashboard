@@ -13,7 +13,18 @@ const DEFAULT_SESSIONS = [
 
 const clampFeed = (g) => Math.min(5000, Math.max(0, Math.round(g)));
 
-export default function FeedPlanCard({ pondId }) {
+// Firmware >= 3.9.0 menyimpan jadwal (jam+gram) di alat & jalankan via RTC
+// lokal — tak butuh koneksi saat jam sesi tiba. Sama seperti pengecekan versi
+// di backend/feed-plan.js (isOfflineCap) — cek ini murni untuk teks info,
+// bukan untuk logika kirim pakan (itu keputusan backend).
+function isOfflineCapableFw(v) {
+  const pa = String(v || '0').split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = [3, 9, 0];
+  for (let i = 0; i < 3; i++) { const a = pa[i] || 0, b = pb[i]; if (a > b) return true; if (a < b) return false; }
+  return true;
+}
+
+export default function FeedPlanCard({ pondId, device }) {
   const [plan, setPlan] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -187,10 +198,23 @@ export default function FeedPlanCard({ pondId }) {
         {!pctOk && <span className="text-xs" style={{ color: 'var(--danger)' }}>Perbaiki total persen ke 100% dulu.</span>}
       </div>
 
-      <p className="text-xs text-muted" style={{ marginTop: 12, display: 'flex', gap: 6, alignItems: 'flex-start' }}>
-        <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 1 }} />
-        Mode <strong>online</strong>: server yang mengirim perintah ke feeder di tiap jam sesi. Saat rencana aktif, <strong>auto-feed onboard dimatikan</strong> (agar feeder tak memberi porsi bawaannya sendiri) — perlu feeder online saat disimpan. Jika alat/internet mati saat jam sesi, pemberian itu terlewat — nanti dipindah ke firmware agar jalan offline.
-      </p>
+      {isOfflineCapableFw(device?.firmware_version) ? (
+        <p className="text-xs text-muted" style={{ marginTop: 12, display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+          <Check size={13} style={{ flexShrink: 0, marginTop: 1, color: 'var(--success)' }} />
+          Mode <strong>offline (onboard)</strong>: firmware alat ({device.firmware_version}) mendukung jadwal mandiri —
+          jam &amp; gram tiap sesi sudah dikirim &amp; tersimpan di alat saat Anda menekan Simpan. Alat memberi pakan
+          sendiri tepat waktu pakai jam internalnya (RTC), <strong>walau internet/server sedang mati</strong>. Simpan ulang
+          rencana kalau Anda mengubah jam/persen agar jadwal di alat ikut ter-update.
+        </p>
+      ) : (
+        <p className="text-xs text-muted" style={{ marginTop: 12, display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+          <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 1 }} />
+          Mode <strong>online</strong>: server yang mengirim perintah ke feeder di tiap jam sesi. Saat rencana aktif, <strong>auto-feed onboard dimatikan</strong> (agar feeder tak memberi porsi bawaannya sendiri) — perlu feeder online saat disimpan. Jika alat/internet mati saat jam sesi, pemberian itu terlewat.
+          {device?.firmware_version && (
+            <> Update firmware alat ke 3.9.0 ke atas agar bisa jalan offline (lihat tab Pengaturan/Firmware).</>
+          )}
+        </p>
+      )}
     </div>
   );
 }

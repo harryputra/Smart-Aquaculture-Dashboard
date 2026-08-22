@@ -152,7 +152,7 @@ export default function FeedingTab({ pondId }) {
             })}
           </div>
 
-          {espTab === 'plan'      && <FeedPlanCard pondId={pondId} />}
+          {espTab === 'plan'      && <FeedPlanCard pondId={pondId} device={feederData.settings} />}
           {espTab === 'status'    && <StatusSistemPanel device={feederData.settings} onAssign={() => {}} />}
           {espTab === 'feedctl'   && <FeedControlSyncPanel device={feederData.settings} />}
           {espTab === 'feeding'   && <PakanOtomatisPanel device={feederData.settings} />}
