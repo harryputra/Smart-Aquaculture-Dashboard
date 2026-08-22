@@ -853,12 +853,17 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
 
   app.get('/api/lele/devices/:deviceId/sessions', requireDeviceAccess('deviceId'), async (req, res) => {
     try {
+      // 50 dulu cuma cukup utk riwayat pendek; sekarang 1 siklus (~90 hari x
+      // 3 sesi/hari = ~270) + histori backfill bisa lebih dari itu, dan
+      // sesi lama akan terdorong keluar sepenuhnya dari tampilan Riwayat
+      // Akhir kalau limit terlalu kecil. Naikkan cukup besar utk 1 siklus.
+      const limit = Math.min(1000, Math.max(1, parseInt(req.query.limit) || 500));
       const r = await pool.query(
         `SELECT s.*,
           (SELECT json_agg(b.*) FROM lele_feed_batches b WHERE b.feed_session_id = s.feed_session_id) as batches
          FROM lele_feed_sessions s
-         WHERE s.device_id = $1 ORDER BY s.started_at DESC LIMIT 50`,
-        [req.params.deviceId]
+         WHERE s.device_id = $1 ORDER BY s.started_at DESC LIMIT $2`,
+        [req.params.deviceId, limit]
       );
       res.json(r.rows);
     } catch (e) { res.status(500).json({ error: e.message }); }
