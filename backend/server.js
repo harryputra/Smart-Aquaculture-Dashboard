@@ -1082,20 +1082,55 @@ app.get('/api/feeding-logs/:pondId', requirePondAccess('pondId'), async (req, re
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/feeding-logs', async (req, res) => {
+app.post('/api/feeding-logs', requireRole('pekerja', 'pemilik'), async (req, res) => {
   try {
-    const { pond_id, feed_amount_kg, feed_type, note } = req.body;
-    const r = await pool.query(
-      `INSERT INTO feeding_logs (pond_id, feed_amount_kg, feed_type, triggered_by, note) 
-       VALUES ($1,$2,$3,'manual',$4) RETURNING *`,
-      [pond_id, feed_amount_kg, feed_type, note]
-    );
+    const { pond_id, feed_amount_kg, feed_type, note, timestamp } = req.body;
 
-    await pool.query(
-      `INSERT INTO notifications (pond_id, type, category, title, message)
-       VALUES ($1, 'info', 'feeding', $2, $3)`,
-      [pond_id, `Pakan Diberikan: ${feed_amount_kg} kg`, `Pemberian pakan manual berhasil dicatat.`]
-    );
+    // pond_id datang dari body (bukan req.params), jadi tak bisa pakai
+    // requirePondAccess() langsung — verifikasi kepemilikan manual di sini
+    // (endpoint ini sebelumnya TANPA cek ini sama sekali: user org mana pun
+    // bisa mencatat pakan ke pond_id kolam org lain).
+    if (req.auth.role !== 'superadmin') {
+      const own = await pool.query(
+        `SELECT 1 FROM ponds p JOIN farms f ON p.farm_id = f.farm_id
+         WHERE p.pond_id = $1 AND f.org_id = $2`, [pond_id, req.auth.org]);
+      if (!own.rows.length) return res.status(404).json({ error: 'Kolam tidak ditemukan atau bukan milik organisasi Anda.' });
+    }
+
+    // timestamp mundur (backfill histori) hanya utk Pemilik/Super Admin —
+    // mencatat pakan hari ini boleh pekerja, tapi mengubah catatan tanggal
+    // lampau yang memengaruhi laporan biaya/FCR perlu wewenang lebih tinggi.
+    let ts = null;
+    if (timestamp) {
+      if (req.auth.role !== 'pemilik' && req.auth.role !== 'superadmin') {
+        return res.status(403).json({ error: 'Hanya Pemilik/Super Admin yang boleh input tanggal mundur.' });
+      }
+      const parsed = new Date(timestamp);
+      if (isNaN(parsed.getTime())) return res.status(400).json({ error: 'timestamp tidak valid.' });
+      ts = parsed;
+    }
+
+    const r = ts
+      ? await pool.query(
+          `INSERT INTO feeding_logs (pond_id, feed_amount_kg, feed_type, triggered_by, note, timestamp)
+           VALUES ($1,$2,$3,'manual',$4,$5) RETURNING *`,
+          [pond_id, feed_amount_kg, feed_type, note, ts]
+        )
+      : await pool.query(
+          `INSERT INTO feeding_logs (pond_id, feed_amount_kg, feed_type, triggered_by, note)
+           VALUES ($1,$2,$3,'manual',$4) RETURNING *`,
+          [pond_id, feed_amount_kg, feed_type, note]
+        );
+
+    // Entri tanggal-mundur bukan kejadian yang baru saja terjadi — jangan
+    // munculkan notifikasi "baru saja" untuk sesuatu yang terjadi bulan lalu.
+    if (!ts) {
+      await pool.query(
+        `INSERT INTO notifications (pond_id, type, category, title, message)
+         VALUES ($1, 'info', 'feeding', $2, $3)`,
+        [pond_id, `Pakan Diberikan: ${feed_amount_kg} kg`, `Pemberian pakan manual berhasil dicatat.`]
+      );
+    }
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
