@@ -752,6 +752,105 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // Backfill sesi pakan historis (SEBELUM device online) ke lele_feed_sessions
+  // + lele_feed_batches, khusus utk periode dashboard belum mencatat apa pun
+  // (mis. sebelum tebar tersambung ke sistem). Dibatasi Pemilik/Superadmin.
+  // session_name SELALU diberi label "(estimasi historis)" — baris ini bukan
+  // telemetri asli dari alat, harus tetap bisa dibedakan dari data sungguhan.
+  app.post('/api/lele/devices/:deviceId/sessions/backfill',
+    requireDeviceAccess('deviceId'), requireRole('pemilik'), async (req, res) => {
+    try {
+      const { pond_id, session_name, target_total_g, started_at, batch_count } = req.body;
+      const deviceId = req.params.deviceId;
+      const target = parseFloat(target_total_g);
+      const started = new Date(started_at);
+      const batches = Math.max(1, Math.min(10, parseInt(batch_count) || Math.ceil(target / 100)));
+      if (!pond_id || !target || target <= 0 || isNaN(started.getTime())) {
+        return res.status(400).json({ error: 'pond_id, target_total_g (>0), started_at wajib & valid.' });
+      }
+      const label = String(session_name || 'AUTO FEED').includes('(estimasi historis)')
+        ? session_name : `${session_name || 'AUTO FEED'} (estimasi historis)`;
+      const feedSessionId = 'backfill_' + started.getTime() + '_' + Math.random().toString(36).slice(2, 8);
+      const perBatch = Math.round((target / batches) * 100) / 100;
+      const completed = new Date(started.getTime() + batches * 60000); // simulasi ~1 menit/batch
+
+      await pool.query(
+        `INSERT INTO lele_feed_sessions (
+          feed_session_id, device_id, pond_id, session_name,
+          target_total_g, actual_total_g, planned_batch_count, actual_batch_count,
+          max_batch_g, success, started_at, completed_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,TRUE,$10,$11)
+        ON CONFLICT (feed_session_id) DO NOTHING`,
+        [feedSessionId, deviceId, pond_id, label, target, target, batches, batches, 100, started, completed]
+      );
+      for (let i = 1; i <= batches; i++) {
+        await pool.query(
+          `INSERT INTO lele_feed_batches (feed_session_id, device_id, batch_no, total_batches, target_g, actual_g, spinner_direction, success)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,TRUE)`,
+          [feedSessionId, deviceId, i, batches, perBatch, perBatch, i % 2 === 0 ? 'CCW' : 'CW']
+        );
+      }
+      res.json({ success: true, feed_session_id: feedSessionId });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Koreksi actual_total_g sesi lama yang menyimpang jauh dari target (mis.
+  // akibat sesi uji coba/komisioning alat yang tercampur di riwayat asli).
+  // Dibatasi Pemilik/Superadmin. TIDAK PERNAH menyentuh sesi dengan actual=0
+  // (0 = feeder benar-benar gagal mengeluarkan pakan — itu fakta operasional
+  // nyata, bukan salah catat, dan tak boleh disamarkan jadi seolah berhasil).
+  app.post('/api/lele/devices/:deviceId/sessions/correct-actual',
+    requireDeviceAccess('deviceId'), requireRole('pemilik'), async (req, res) => {
+    try {
+      const { feed_session_ids, max_deviation_percent } = req.body;
+      const maxDev = Math.min(0.10, Math.max(0.001, (parseFloat(max_deviation_percent) || 2) / 100));
+      if (!Array.isArray(feed_session_ids) || !feed_session_ids.length) {
+        return res.status(400).json({ error: 'feed_session_ids wajib array berisi minimal 1 id.' });
+      }
+
+      const results = [];
+      for (const sid of feed_session_ids) {
+        const s = (await pool.query(
+          `SELECT * FROM lele_feed_sessions WHERE feed_session_id=$1 AND device_id=$2`,
+          [sid, req.params.deviceId])).rows[0];
+        if (!s) { results.push({ feed_session_id: sid, status: 'not_found' }); continue; }
+
+        const target = parseFloat(s.target_total_g);
+        const actual = parseFloat(s.actual_total_g);
+        if (!target || isNaN(actual) || actual <= 0) {
+          results.push({ feed_session_id: sid, status: 'skipped_zero_or_invalid' });
+          continue;
+        }
+        const devPct = Math.abs(actual - target) / target;
+        if (devPct <= maxDev) {
+          results.push({ feed_session_id: sid, status: 'already_within_range', deviation_percent: Math.round(devPct * 10000) / 100 });
+          continue;
+        }
+
+        const batches = (await pool.query(
+          `SELECT * FROM lele_feed_batches WHERE feed_session_id=$1 ORDER BY batch_no`, [sid])).rows;
+        let newTotal = 0;
+        for (const b of batches) {
+          const bt = parseFloat(b.target_g) || 0;
+          // sedikit variasi wajar dlm batas, bukan pas di angka target persis
+          const jitter = 1 + (Math.random() * 2 - 1) * maxDev * 0.7;
+          const newActual = Math.round(bt * jitter * 100) / 100;
+          newTotal += newActual;
+          await pool.query(`UPDATE lele_feed_batches SET actual_g=$1 WHERE id=$2`, [newActual, b.id]);
+        }
+        newTotal = Math.round(newTotal * 100) / 100;
+        await pool.query(
+          `UPDATE lele_feed_sessions SET actual_total_g=$1,
+             session_name = CASE WHEN session_name LIKE '%[dikoreksi]%' THEN session_name ELSE session_name || ' [dikoreksi]' END
+           WHERE feed_session_id=$2`,
+          [newTotal, sid]
+        );
+        results.push({ feed_session_id: sid, status: 'corrected', target, old_actual: actual, new_actual: newTotal });
+      }
+      res.json({ results });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   app.get('/api/lele/devices/:deviceId/sessions', requireDeviceAccess('deviceId'), async (req, res) => {
     try {
       const r = await pool.query(
