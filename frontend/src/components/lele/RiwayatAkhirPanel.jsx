@@ -1,12 +1,17 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle, XCircle, AlertTriangle, Calendar, History, Scale, Bug, Fish } from 'lucide-react';
+import { CheckCircle, XCircle, AlertTriangle, Calendar, History, Scale, Bug, Fish, Wallet, TrendingUp } from 'lucide-react';
 import { getLeleSessions, getLeleErrors, getLeleBiomassSummary, getLeleBiomassSamples } from '../../services/leleApi';
+import { getFinancial } from '../../services/api';
+
+const rupiah = (n) => (n == null ? '-' :
+  new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n));
 
 export default function RiwayatAkhirPanel({ device }) {
   const [sessions, setSessions] = useState([]);
   const [errors, setErrors] = useState([]);
   const [summaries, setSummaries] = useState([]);
   const [samples, setSamples] = useState([]);
+  const [fin, setFin] = useState(null);
   const [activeTab, setActiveTab] = useState('summary');
 
   async function load() {
@@ -19,6 +24,11 @@ export default function RiwayatAkhirPanel({ device }) {
       ]);
       setSessions(s); setErrors(e); setSummaries(sm); setSamples(sp);
     } catch (e) { /* */ }
+    // Sumber SAMA persis dgn tab Keuangan (getFinancial) — supaya angka total
+    // pakan/biaya di sini tak pernah berbeda dari yg ditampilkan di Keuangan.
+    if (device.pond_id) {
+      try { setFin(await getFinancial(device.pond_id)); } catch (e) { /* siklus belum aktif */ }
+    }
   }
 
   useEffect(() => { load(); const i = setInterval(load, 5000); return () => clearInterval(i); }, [device.device_id]);
@@ -48,6 +58,30 @@ export default function RiwayatAkhirPanel({ device }) {
 
   return (
     <>
+      {/* Ringkasan Keuangan Siklus — SUMBER SAMA dgn tab Keuangan (getFinancial),
+          supaya total pakan/biaya di sini selalu konsisten dgn Keuangan. */}
+      {fin && (
+        <div className="card mb-6">
+          <div className="card-header">
+            <div>
+              <div className="card-title"><Wallet size={18} style={{ verticalAlign: -3 }} /> Ringkasan Keuangan Siklus</div>
+              <div className="card-subtitle">Sama dengan tab Keuangan — hari ke-{fin.days} sejak tebar</div>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 12 }}>
+            <FinBox label="Total Pakan Diberikan" value={`${fin.total_feed_kg.toLocaleString('id-ID')} kg`} />
+            <FinBox label="Biaya Pakan" value={rupiah(fin.feed_cost)} sub={`@ ${rupiah(fin.feed_price_per_kg)}/kg`} />
+            <FinBox label="Biaya Operasional" value={rupiah(fin.op_cost)} />
+            <FinBox label="Biaya Benih" value={rupiah(fin.fry_cost)} />
+            <FinBox label="Total Biaya" value={rupiah(fin.total_cost)} strong />
+            <FinBox label="Biomassa Saat Ini" value={`${fin.est_biomass_kg.toLocaleString('id-ID')} kg`}
+              sub={`${fin.avg_weight_g} g/ekor × ${fin.population.toLocaleString('id-ID')} ekor`} />
+            <FinBox label="Prediksi Panen" value={`${fin.proj_harvest_kg.toLocaleString('id-ID')} kg`}
+              sub={`target ${fin.target_weight_g} g/ekor`} icon={<TrendingUp size={13} />} />
+          </div>
+        </div>
+      )}
+
       {/* Last 3 (mirror LCD history menu) */}
       <div className="card mb-6">
         <div className="card-header">
@@ -255,5 +289,15 @@ export default function RiwayatAkhirPanel({ device }) {
         ))}
       </div>
     </>
+  );
+}
+
+function FinBox({ label, value, sub, strong, icon }) {
+  return (
+    <div style={{ padding: 12, background: 'var(--bg-elevated)', borderRadius: 10, border: '1px solid var(--border-primary)' }}>
+      <div className="text-xs text-muted" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>{icon}{label}</div>
+      <div style={{ fontWeight: strong ? 800 : 700, fontSize: strong ? 20 : 16, marginTop: 2 }}>{value}</div>
+      {sub && <div className="text-xs text-muted" style={{ marginTop: 2 }}>{sub}</div>}
+    </div>
   );
 }
