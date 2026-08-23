@@ -75,7 +75,7 @@ String topicConfig;
 
 // ===================== OTA (update firmware jarak jauh) =====================
 // v3.9: HTTPS pull + verifikasi sha256 (mbedtls) + rollback dual-partition.
-const char* FIRMWARE_VERSION = "3.9.0";
+const char* FIRMWARE_VERSION = "3.9.1";
 // Host dashboard (lewat Cloudflare) untuk self-check manifest. URL unduh .bin
 // yang sesungguhnya datang dari manifest MQTT (backend), jadi ini hanya utk poll.
 const char* OTA_API_HOST = "aquaculture.trin-polman.id";   // ganti ke domain dashboard Anda
@@ -104,6 +104,11 @@ Preferences prefs;
 
 bool rtcReady         = false;
 bool ntpSynced        = false;     // true jika RTC sudah pernah disinkron via NTP
+bool rtcLostPowerAtBoot = false;   // true jika rtc.lostPower() saat boot ini (mis. baterai
+                                    // cadangan DS3231 lemah/habis stlh mati listrik) — jam
+                                    // sempat fallback ke waktu kompilasi sampai NTP resync.
+                                    // rtc_ok saja TIDAK cukup menandai ini (cuma cek chip
+                                    // merespons, bukan cek waktunya akurat).
 unsigned long lastNtpSyncMs = 0;   // millis() saat NTP sync terakhir berhasil
 bool autoFeedEnabled  = true;
 bool feedingInProgress = false;
@@ -1118,6 +1123,8 @@ void publishDeviceStatus(bool forcePublish) {
   payload += "\"wifi_connected\":"        + String(WiFi.status()==WL_CONNECTED?"true":"false") + ",";
   payload += "\"mqtt_connected\":"        + String(mqttReady() ? "true" : "false")        + ",";
   payload += "\"rtc_ok\":"               + String(rtcReady ? "true" : "false")            + ",";
+  payload += "\"rtc_lost_power_at_boot\":" + String(rtcLostPowerAtBoot ? "true" : "false") + ",";
+  payload += "\"ntp_synced\":"           + String(ntpSynced ? "true" : "false")           + ",";
   payload += "\"auto_feed_enabled\":"    + String(autoFeedEnabled ? "true" : "false")     + ",";
   payload += "\"feeding_in_progress\":"  + String(feedingInProgress ? "true" : "false")   + ",";
   payload += "\"screen\":\""             + screenName()                                   + "\",";
@@ -2613,6 +2620,7 @@ void setup() {
     if (rtc.lostPower()) {
       // Fallback ke waktu kompilasi sebagai minimum (akan di-override NTP)
       rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+      rtcLostPowerAtBoot = true;
       Serial.println("  RTC lost power: set waktu kompilasi sebagai fallback sementara");
     }
     resetScheduleDailyFlagsIfNeeded();

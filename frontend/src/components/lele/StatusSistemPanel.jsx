@@ -1,6 +1,6 @@
 import {
   Wifi, WifiOff, Fish, Scale, CheckCircle, XCircle,
-  Settings as SettingsIcon, Gauge,
+  Settings as SettingsIcon, Gauge, AlertTriangle,
 } from 'lucide-react';
 
 export default function StatusSistemPanel({ device, onAssign }) {
@@ -60,11 +60,29 @@ export default function StatusSistemPanel({ device, onAssign }) {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
           <Indicator ok={device.wifi_connected} label="WiFi" />
           <Indicator ok={device.mqtt_connected} label="MQTT Broker" />
-          <Indicator ok={device.rtc_ok} label="RTC DS3231" />
+          <Indicator
+            ok={device.rtc_ok}
+            warn={device.rtc_ok && device.rtc_lost_power_at_boot}
+            warnLabel="Sempat reset saat boot (cek baterai cadangan)"
+            label="RTC DS3231"
+          />
           <Indicator ok={device.hx_chamber_ok} label="HX711 Chamber" />
           <Indicator ok={device.hx_sampling_ok} label="HX711 Sampling" />
           <Indicator ok={device.auto_feed_enabled} label="Auto Feed" />
         </div>
+
+        {device.rtc_lost_power_at_boot && (
+          <div style={{ marginTop: 16, padding: 12, background: '#fef3c7', border: '1px solid #fbbf24', borderRadius: 10, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+            <AlertTriangle size={20} style={{ color: '#b45309', flexShrink: 0, marginTop: 2 }} />
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#92400e' }}>RTC sempat kehilangan waktu saat boot terakhir</div>
+              <div className="text-xs" style={{ color: '#92400e' }}>
+                Feeder ini pernah mati listrik dan jamnya (RTC DS3231) reset ke waktu default sebelum {device.ntp_synced ? 'akhirnya terkoreksi otomatis via NTP' : 'sempat terkoreksi via NTP (cek koneksi WiFi bila terus berulang)'}.
+                Jadwal pakan tersimpan aman, tapi berisiko terlewat selama jam belum terkoreksi. Cek baterai cadangan RTC bila kejadian ini sering berulang.
+              </div>
+            </div>
+          </div>
+        )}
 
         {device.spinner_pwm != null && device.feeding_in_progress && (
           <div style={{ marginTop: 16, padding: 12, background: 'var(--bg-elevated)', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -80,13 +98,18 @@ export default function StatusSistemPanel({ device, onAssign }) {
   );
 }
 
-function Indicator({ ok, label }) {
+function Indicator({ ok, label, warn, warnLabel }) {
+  const icon = warn
+    ? <AlertTriangle size={20} style={{ color: '#b45309' }} />
+    : ok ? <CheckCircle size={20} style={{ color: 'var(--success)' }} /> : <XCircle size={20} style={{ color: 'var(--danger)' }} />;
   return (
     <div style={{ padding: 12, background: 'var(--bg-elevated)', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
-      {ok ? <CheckCircle size={20} style={{ color: 'var(--success)' }} /> : <XCircle size={20} style={{ color: 'var(--danger)' }} />}
+      {icon}
       <div>
         <div style={{ fontSize: 13, fontWeight: 600 }}>{label}</div>
-        <div className="text-xs text-muted">{ok ? 'OK' : 'Tidak terdeteksi'}</div>
+        <div className="text-xs text-muted" style={warn ? { color: '#b45309' } : undefined}>
+          {warn ? warnLabel : ok ? 'OK' : 'Tidak terdeteksi'}
+        </div>
       </div>
     </div>
   );

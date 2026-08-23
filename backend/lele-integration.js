@@ -69,9 +69,10 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
     try {
       const payload = JSON.parse(_raw);
       const deviceId = payload.device_id || 'unknown';
-      const pondR = await pool.query(`SELECT pond_id, is_online FROM lele_devices WHERE device_id = $1`, [deviceId]);
+      const pondR = await pool.query(`SELECT pond_id, is_online, rtc_lost_power_at_boot FROM lele_devices WHERE device_id = $1`, [deviceId]);
       const pondId = pondR.rows[0]?.pond_id || null;
       const wasOffline = pondR.rows[0]?.is_online === false;   // untuk deteksi "kembali online"
+      const rtcLostPowerWasAlready = pondR.rows[0]?.rtc_lost_power_at_boot === true;
 
       if (topic === 'lele/device/status') {
         liveDataCache[deviceId] = { ...payload, received_at: new Date() };
@@ -104,9 +105,9 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
             last_feed_success, last_feed_target_g, last_feed_actual_g,
             last_feed_batch_count, last_feed_time,
             last_error_code, last_error_msg, last_error_time,
-            sample_is_manual, spinner_pwm
+            sample_is_manual, spinner_pwm, rtc_lost_power_at_boot, ntp_synced
           ) VALUES ($1, TRUE, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(),
-            $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34)
+            $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36)
           ON CONFLICT (device_id) DO UPDATE SET
             is_online = TRUE,
             wifi_connected = EXCLUDED.wifi_connected,
@@ -142,7 +143,9 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
             last_error_msg = EXCLUDED.last_error_msg,
             last_error_time = EXCLUDED.last_error_time,
             sample_is_manual = EXCLUDED.sample_is_manual,
-            spinner_pwm = EXCLUDED.spinner_pwm
+            spinner_pwm = EXCLUDED.spinner_pwm,
+            rtc_lost_power_at_boot = EXCLUDED.rtc_lost_power_at_boot,
+            ntp_synced = EXCLUDED.ntp_synced
         `, [
           deviceId,
           payload.wifi_connected || false,
@@ -178,7 +181,24 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
           payload.last_error_time || '-',
           payload.sample_is_manual || false,
           payload.spinner_pwm || 0,
+          payload.rtc_lost_power_at_boot || false,
+          payload.ntp_synced || false,
         ]);
+
+        // rtc_lost_power_at_boot BARU jadi true (belum pernah dilaporkan sblm ini
+        // sejak boot terakhir) -> alat sempat mati listrik & baterai cadangan RTC
+        // (DS3231) gagal menjaga waktu. Jadwal Rencana Pakan yg tersimpan TIDAK
+        // hilang (ada di flash), tapi bisa terlewat sampai NTP resync jam-nya.
+        if (payload.rtc_lost_power_at_boot && !rtcLostPowerWasAlready && pondId) {
+          await pool.query(
+            `INSERT INTO notifications (pond_id, type, category, title, message)
+             VALUES ($1,'risk','feeding',$2,$3)`,
+            [pondId, '⏰ RTC Kehilangan Waktu Saat Boot',
+             `Feeder ${deviceId} sempat mati listrik dan jam internalnya (RTC) reset ke waktu default. ` +
+             `Jadwal pakan tersimpan aman, tapi bisa TERLEWAT sampai jam terkoreksi otomatis via NTP ` +
+             `(butuh WiFi tersambung). Cek baterai cadangan modul RTC (DS3231) bila sering terjadi.`]
+          ).catch(() => {});
+        }
 
         // Sync schedules array
         if (Array.isArray(payload.schedules)) {

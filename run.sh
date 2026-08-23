@@ -211,6 +211,7 @@ MIGRATIONS=(
   database/migration-cctv.sql
   database/migration-feed-plan.sql
   database/migration-water-devices.sql
+  database/migration-rtc-lostpower.sql
 )
 apply_migrations() {
   load_env
