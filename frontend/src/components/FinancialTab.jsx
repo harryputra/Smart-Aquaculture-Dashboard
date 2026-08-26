@@ -3,7 +3,7 @@ import {
   Wallet, Wheat, TrendingUp, AlertTriangle, Plus, Trash2, PiggyBank, Receipt,
 } from 'lucide-react';
 import {
-  getFeedStock, updateFeedStock, getCosts, addCost, deleteCost, getFinancial,
+  getFeedStock, updateFeedStock, getCosts, addCost, deleteCost, getFinancial, updateCycle,
 } from '../services/api';
 
 const rupiah = (n) =>
@@ -33,9 +33,18 @@ export default function FinancialTab({ pondId }) {
       const [f, s, c] = await Promise.all([getFinancial(pondId), getFeedStock(pondId), getCosts(pondId)]);
       setFin(f); setStock(s); setCosts(c);
       if (s) { setPrice(String(s.price_per_kg || '')); setLowKg(String(s.low_threshold_kg || '')); }
+      if (f) { setSellPrice(f.target_sell_price_per_kg != null ? String(f.target_sell_price_per_kg) : ''); }
     } catch (e) { console.error(e); } finally { setLoading(false); }
   }
   useEffect(() => { load(); }, [pondId]);
+
+  async function saveSellPrice() {
+    setBusy(true);
+    try {
+      await updateCycle(pondId, { target_sell_price_per_kg: sellPrice !== '' ? parseFloat(sellPrice) : null });
+      await load();
+    } catch (e) { alert(e.message); } finally { setBusy(false); }
+  }
 
   if (loading) return <div className="loading"><div className="spinner" /></div>;
 
@@ -108,6 +117,8 @@ export default function FinancialTab({ pondId }) {
             <Box label="Biaya pakan" value={rupiah(fin.feed_cost)} sub={`${fin.total_feed_kg} kg × ${rupiah(fin.feed_price_per_kg)}`} />
             <Box label="Biaya operasional" value={rupiah(fin.op_cost)} />
             <Box label="Total biaya" value={rupiah(fin.total_cost)} strong />
+            <Box label="HPP Berjalan" value={fin.hpp_running_per_kg != null ? `${rupiah(fin.hpp_running_per_kg)}/kg` : '-'}
+              sub={fin.hpp_running_per_kg != null ? 'Estimasi, berubah sampai panen' : 'Belum ada sampling biomassa'} />
           </div>
           <div style={{ padding: 14, background: 'var(--bg-elevated)', borderRadius: 10 }}>
             <div className="flex items-center gap-3" style={{ flexWrap: 'wrap', marginBottom: 10 }}>
@@ -116,6 +127,7 @@ export default function FinancialTab({ pondId }) {
               <div className="flex items-end gap-2" style={{ marginLeft: 'auto' }}>
                 <div className="form-group" style={{ margin: 0 }}><label className="form-label">Estimasi harga jual (Rp/kg)</label>
                   <input className="form-input" type="number" min="0" value={sellPrice} onChange={e => setSellPrice(e.target.value)} placeholder="mis. 25000" style={{ width: 150 }} /></div>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={saveSellPrice}>Simpan</button>
               </div>
             </div>
             {sp > 0 && (
