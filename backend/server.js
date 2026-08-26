@@ -150,7 +150,7 @@ function clearValveWatch(pond_id, valveKind) {
 async function forceCloseValve(pond_id, valveKind, reasonCode) {
   const key = `${pond_id}:${valveKind}`;
   const watch = valveAutoStop[key];
-  if (!watch) return; // sudah ditutup oleh timer lain (mis. safetyTimer & durationTimer barengan di 15 menit)
+  if (!watch) return; // sudah ditutup oleh timer lain (mis. safetyTimer & durationTimer barengan)
   clearValveWatch(pond_id, valveKind);
 
   const p = await pool.query(`SELECT farm_id FROM ponds WHERE pond_id = $1`, [pond_id]);
@@ -163,7 +163,7 @@ async function forceCloseValve(pond_id, valveKind, reasonCode) {
   const REASON_TEXT = {
     depth_reached: () => `Auto-stop: ketinggian target ${Number(watch?.targetDepth).toFixed(1)}cm tercapai`,
     duration: () => `Auto-stop: durasi ${watch?.durationMinutes} menit habis`,
-    safety_cap: () => `Auto-stop: batas pengaman 15 menit tercapai (kondisi target tak tercapai)`,
+    safety_cap: () => `Auto-stop: batas pengaman ${Number(watch?.safetyCapMinutes ?? 15)} menit tercapai (kondisi target tak tercapai)`,
   };
   const reason = (REASON_TEXT[reasonCode] || (() => 'Auto-stop'))();
   const action = valveKind === 'drain' ? 'valve_close' : 'inlet_close';
@@ -172,6 +172,12 @@ async function forceCloseValve(pond_id, valveKind, reasonCode) {
     `INSERT INTO control_logs (pond_id, action, triggered_by, reason) VALUES ($1, $2, 'auto', $3)`,
     [pond_id, action, reason]
   );
+
+  // Hook opsional dipakai siklus terjadwal (chaining kuras->isi ulang, notifikasi).
+  // Watch manual (Kontrol Air) tidak pernah set ini -> no-op, perilaku lama tak berubah.
+  if (watch.onClosed) {
+    await watch.onClosed(reasonCode).catch(err => console.error('valve onClosed hook failed:', err.message));
+  }
 }
 
 async function checkValveAutoStop(pond_id, currentDepth) {
@@ -795,6 +801,7 @@ app.post('/api/control/:pondId/valve', requirePondAccess('pondId'), async (req, 
           targetDepth: plan.targetDepth,
           durationMinutes: plan.durationMinutes,
           startedAt: new Date(),
+          safetyCapMinutes: VALVE_SAFETY_CAP_MS / 60000,
           safetyTimer: setTimeout(
             () => forceCloseValve(pond_id, valveKind, 'safety_cap')
               .catch(err => console.error('forceCloseValve (safety_cap) failed:', err.message)),
@@ -829,6 +836,7 @@ app.post('/api/control/:pondId/valve', requirePondAccess('pondId'), async (req, 
             targetDepth: null,
             durationMinutes: null,
             startedAt: new Date(),
+            safetyCapMinutes: VALVE_SAFETY_CAP_MS / 60000,
             safetyTimer: setTimeout(
               () => forceCloseValve(pond_id, valveKind, 'safety_cap')
                 .catch(err => console.error('forceCloseValve (safety_cap) failed:', err.message)),
