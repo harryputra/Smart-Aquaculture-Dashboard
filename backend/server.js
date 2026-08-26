@@ -165,6 +165,7 @@ async function forceCloseValve(pond_id, valveKind, reasonCode) {
     depth_reached: () => `Auto-stop: ketinggian target ${Number(watch?.targetDepth).toFixed(1)}cm tercapai`,
     duration: () => `Auto-stop: durasi ${watch?.durationMinutes} menit habis`,
     safety_cap: () => `Auto-stop: batas pengaman ${Number(watch?.safetyCapMinutes ?? VALVE_SAFETY_CAP_MIN)} menit tercapai (kondisi target tak tercapai)`,
+    preempted: () => `Auto-stop: digantikan siklus baru sebelum tercapai`,
   };
   const reason = (REASON_TEXT[reasonCode] || (() => 'Auto-stop'))();
   const action = valveKind === 'drain' ? 'valve_close' : 'inlet_close';
@@ -191,6 +192,7 @@ async function checkValveAutoStop(pond_id, currentDepth) {
   try {
     if (currentDepth == null || isNaN(parseFloat(currentDepth))) return;
     const depth = parseFloat(currentDepth);
+    if (depth < 0 || depth > 500) return; // nilai sensor tidak masuk akal -- jangan jadi dasar auto-stop
     for (const valveKind of ['drain', 'inlet']) {
       const watch = valveAutoStop[`${pond_id}:${valveKind}`];
       if (!watch || (watch.mode !== 'depth_target' && watch.mode !== 'depth_percent')) continue;
@@ -223,20 +225,34 @@ async function runScheduledDrainCycle(schedule) {
       return;
     }
 
-    clearValveWatch(pond_id, 'drain');
-    clearValveWatch(pond_id, 'inlet');
-
     const drainTarget = parseFloat(schedule.drain_target_cm);
     const refillTarget = parseFloat(schedule.refill_target_cm);
-    const capMinutes = Math.max(1, schedule.safety_cap_minutes || 30);
+    if (isNaN(drainTarget) || isNaN(refillTarget) || drainTarget <= 0 || refillTarget <= 0 || drainTarget >= refillTarget) {
+      await pool.query(
+        `INSERT INTO notifications (pond_id, type, category, title, message)
+         VALUES ($1,'risk','system',$2,$3)`,
+        [pond_id, '🚱 Jadwal Kuras Gagal Dijalankan',
+         `Jadwal kuras berbasis ketinggian pukul ${schedule.schedule_time.toString().slice(0, 5)} tidak bisa dijalankan: ` +
+         `konfigurasi target ketinggian tidak valid. Katup TIDAK dibuka. Periksa kembali pengaturan jadwal ini.`]
+      ).catch(() => {});
+      return;
+    }
+
+    const capMinutes = Math.min(120, Math.max(1, schedule.safety_cap_minutes || 30));
     const capMs = capMinutes * 60 * 1000;
 
-    mqttClient.publish(valveTopic(farm_id, pond_id), JSON.stringify({ command: 'open_valve', source: 'schedule' }));
-    await pool.query(
-      `INSERT INTO control_logs (pond_id, action, triggered_by, reason) VALUES ($1,'valve_open','schedule',$2)`,
-      [pond_id, `Jadwal kuras: target ketinggian ${drainTarget.toFixed(1)}cm`]
-    );
+    // Cegah watch lama (siklus kemarin yang nyangkut, atau kontrol manual)
+    // "hilang" tanpa jejak -- tutup+catat dulu kalau ada, baru mulai siklus baru.
+    // Aman dipanggil walau tidak ada watch aktif (forceCloseValve no-op kalau watch tak ada).
+    if (valveAutoStop[`${pond_id}:drain`]) await forceCloseValve(pond_id, 'drain', 'preempted').catch(() => {});
+    if (valveAutoStop[`${pond_id}:inlet`]) await forceCloseValve(pond_id, 'inlet', 'preempted').catch(() => {});
 
+    mqttClient.publish(valveTopic(farm_id, pond_id), JSON.stringify({ command: 'open_valve', source: 'schedule' }));
+
+    // Watch dipasang SEBELUM I/O apa pun yang bisa gagal (query DB di bawah).
+    // Kalau urutan dibalik dan query reject, katup akan terbuka tanpa timer
+    // sama sekali -- firmware tidak punya timeout sendiri. Pola sama seperti
+    // endpoint manual POST /api/control/:pondId/valve.
     valveAutoStop[`${pond_id}:drain`] = {
       mode: 'depth_target',
       targetDepth: drainTarget,
@@ -271,10 +287,6 @@ async function runScheduledDrainCycle(schedule) {
         ).catch(() => {});
 
         mqttClient.publish(valveTopic(farm_id, pond_id), JSON.stringify({ command: 'open_inlet', source: 'schedule' }));
-        await pool.query(
-          `INSERT INTO control_logs (pond_id, action, triggered_by, reason) VALUES ($1,'inlet_open','schedule',$2)`,
-          [pond_id, `Jadwal kuras: lanjut isi ulang ke ${refillTarget.toFixed(1)}cm`]
-        ).catch(() => {});
 
         valveAutoStop[`${pond_id}:inlet`] = {
           mode: 'depth_target',
@@ -309,22 +321,29 @@ async function runScheduledDrainCycle(schedule) {
             ).catch(() => {});
           },
         };
+
+        await pool.query(
+          `INSERT INTO control_logs (pond_id, action, triggered_by, reason) VALUES ($1,'inlet_open','schedule',$2)`,
+          [pond_id, `Jadwal kuras: lanjut isi ulang ke ${refillTarget.toFixed(1)}cm`]
+        ).catch(() => {});
       },
     };
+
+    await pool.query(`UPDATE drain_schedules SET last_executed = NOW() WHERE id = $1`, [scheduleId]).catch(() => {});
+    await pool.query(
+      `INSERT INTO control_logs (pond_id, action, triggered_by, reason) VALUES ($1,'valve_open','schedule',$2)`,
+      [pond_id, `Jadwal kuras: target ketinggian ${drainTarget.toFixed(1)}cm`]
+    ).catch(() => {});
     return;
   }
 
-  // mode 'duration' (default/lama) -- diperbaiki agar benar-benar auto-close,
-  // memakai nilai duration_minutes asli (bukan dipotong ke 15 menit seperti
-  // kontrol manual sekali klik -- ini jadwal rutin yang sengaja diatur user).
-  clearValveWatch(pond_id, 'drain');
-  mqttClient.publish(valveTopic(farm_id, pond_id), JSON.stringify({ command: 'open_valve', source: 'schedule' }));
-  await pool.query(
-    `INSERT INTO control_logs (pond_id, action, triggered_by, reason) VALUES ($1, 'valve_open', 'schedule', 'Jadwal otomatis')`,
-    [pond_id]
-  );
+  // mode 'duration' (default/lama) -- diperbaiki agar benar-benar auto-close.
+  const durationMinutes = Math.min(120, Math.max(1, schedule.duration_minutes || 30));
 
-  const durationMinutes = Math.max(1, schedule.duration_minutes || 30);
+  if (valveAutoStop[`${pond_id}:drain`]) await forceCloseValve(pond_id, 'drain', 'preempted').catch(() => {});
+
+  mqttClient.publish(valveTopic(farm_id, pond_id), JSON.stringify({ command: 'open_valve', source: 'schedule' }));
+
   valveAutoStop[`${pond_id}:drain`] = {
     mode: 'duration',
     targetDepth: null,
@@ -340,6 +359,12 @@ async function runScheduledDrainCycle(schedule) {
       await pool.query(`UPDATE drain_schedules SET last_executed = NOW() WHERE id = $1`, [scheduleId]).catch(() => {});
     },
   };
+
+  await pool.query(`UPDATE drain_schedules SET last_executed = NOW() WHERE id = $1`, [scheduleId]).catch(() => {});
+  await pool.query(
+    `INSERT INTO control_logs (pond_id, action, triggered_by, reason) VALUES ($1, 'valve_open', 'schedule', 'Jadwal otomatis')`,
+    [pond_id]
+  ).catch(() => {});
 }
 
 // ============================
