@@ -224,9 +224,12 @@ function registerCycleHandlers({ app, pool }) {
       }
       let price = null;
       if (target_sell_price_per_kg !== null) {
-        price = parseFloat(target_sell_price_per_kg);
-        if (isNaN(price) || price < 0) {
+        if (typeof target_sell_price_per_kg !== 'number' && typeof target_sell_price_per_kg !== 'string') {
           return res.status(400).json({ error: 'target_sell_price_per_kg harus angka >= 0 atau null.' });
+        }
+        price = parseFloat(target_sell_price_per_kg);
+        if (!Number.isFinite(price) || price < 0 || price > 100000000) {
+          return res.status(400).json({ error: 'target_sell_price_per_kg harus angka >= 0 dan maksimal 100.000.000, atau null.' });
         }
       }
 
