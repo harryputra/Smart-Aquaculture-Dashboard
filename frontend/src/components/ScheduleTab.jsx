@@ -63,6 +63,11 @@ export default function ScheduleTab({ pondId }) {
     try { await deleteSchedule(id); load(); } catch (e) { alert(e.message); }
   }
 
+  function closeModal() {
+    setShowModal(false);
+    setForm(DEFAULT_FORM);
+  }
+
   const toggleDay = d => setForm(p => ({
     ...p,
     selectedDays: p.selectedDays.includes(d) ? p.selectedDays.filter(x => x !== d) : [...p.selectedDays, d],
@@ -98,7 +103,7 @@ export default function ScheduleTab({ pondId }) {
           <div className="table-wrap">
             <table>
               <thead>
-                <tr><th>Waktu</th><th>Hari</th><th>Mode</th><th>Status</th><th></th></tr>
+                <tr><th>Waktu</th><th>Hari</th><th>Konfigurasi</th><th>Status</th><th></th></tr>
               </thead>
               <tbody>
                 {schedules.map(s => (
@@ -121,11 +126,11 @@ export default function ScheduleTab({ pondId }) {
       </div>
 
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
+        <div className="modal-overlay" onClick={closeModal}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2 className="modal-title">Tambah Jadwal Kuras</h2>
-              <button className="modal-close" onClick={() => setShowModal(false)}><X size={20} /></button>
+              <button className="modal-close" onClick={closeModal}><X size={20} /></button>
             </div>
             <form onSubmit={add}>
               <div className="form-group">
@@ -159,20 +164,25 @@ export default function ScheduleTab({ pondId }) {
               </div>
 
               {form.mode === 'depth' && (
-                <div className="form-row">
-                  <div className="form-group">
-                    <label className="form-label">Kuras sampai (cm) *</label>
-                    <input type="number" required min="0" step="0.1" className="form-input" placeholder="mis. 40"
-                      value={form.drain_target_cm}
-                      onChange={e => setForm({ ...form, drain_target_cm: e.target.value })} />
+                <>
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label className="form-label">Kuras sampai (cm) *</label>
+                      <input type="number" required min="0.1" max="500" step="0.1" className="form-input" placeholder="mis. 40"
+                        value={form.drain_target_cm}
+                        onChange={e => setForm({ ...form, drain_target_cm: e.target.value })} />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Isi ulang sampai (cm) *</label>
+                      <input type="number" required min="0.1" max="500" step="0.1" className="form-input" placeholder="mis. 50"
+                        value={form.refill_target_cm}
+                        onChange={e => setForm({ ...form, refill_target_cm: e.target.value })} />
+                    </div>
                   </div>
-                  <div className="form-group">
-                    <label className="form-label">Isi ulang sampai (cm) *</label>
-                    <input type="number" required min="0" step="0.1" className="form-input" placeholder="mis. 50"
-                      value={form.refill_target_cm}
-                      onChange={e => setForm({ ...form, refill_target_cm: e.target.value })} />
+                  <div className="text-xs text-muted" style={{ marginTop: -8, marginBottom: 12 }}>
+                    Katup kuras terbuka sampai ketinggian ini tercapai, lalu otomatis tertutup dan katup isi terbuka sampai ketinggian isi ulang tercapai.
                   </div>
-                </div>
+                </>
               )}
 
               <div className="form-group">
@@ -188,7 +198,7 @@ export default function ScheduleTab({ pondId }) {
                 </div>
               </div>
               <div className="modal-actions">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Batal</button>
+                <button type="button" className="btn btn-secondary" onClick={closeModal}>Batal</button>
                 <button type="submit" className="btn btn-primary">Simpan</button>
               </div>
             </form>
