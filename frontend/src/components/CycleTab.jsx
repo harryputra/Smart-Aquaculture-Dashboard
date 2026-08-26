@@ -178,7 +178,9 @@ export default function CycleTab({ pondId, onChange }) {
               </tr></thead>
               <tbody>
                 {completed.map(c => {
-                  const hppKg = (c.total_cost && c.harvest_total_kg) ? (parseFloat(c.total_cost) / parseFloat(c.harvest_total_kg)) : null;
+                  const hppCost = parseFloat(c.total_cost);
+                  const hppKg2 = parseFloat(c.harvest_total_kg);
+                  const hppKg = (hppKg2 > 0 && !isNaN(hppCost)) ? hppCost / hppKg2 : null;
                   return (
                     <tr key={c.cycle_id}>
                       <td>{fdate(c.start_date)} → {fdate(c.harvest_date)}</td>
