@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Waves, LogIn, Eye, EyeOff, Zap } from 'lucide-react';
 import { useAuth, ROLE_LABEL } from '../context/AuthContext';
 import { getQuickLoginPublic } from '../services/api';
+import FunderFooter from '../components/FunderFooter';
 
 export default function Login() {
   const { login, quickLogin } = useAuth();
@@ -32,7 +33,7 @@ export default function Login() {
 
   return (
     <div style={{
-      minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 20,
+      minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 20, gap: 24,
       background: 'linear-gradient(135deg,#0e7490 0%,#0891b2 45%,#06b6d4 100%)',
     }}>
       <div className="card" style={{ width: '100%', maxWidth: 410, padding: 32 }}>
@@ -105,6 +106,8 @@ export default function Login() {
           © Smart Aquaculture · POLMAN Bandung
         </p>
       </div>
+
+      <FunderFooter variant="card" />
     </div>
   );
 }

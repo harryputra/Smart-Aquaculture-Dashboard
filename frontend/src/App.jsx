@@ -27,6 +27,7 @@ import QuickLogin from './pages/QuickLogin';
 import Users from './pages/Users';
 import RequireRole from './components/RequireRole';
 import NotificationToasts from './components/NotificationToasts';
+import FunderFooter from './components/FunderFooter';
 import { getUnreadCount } from './services/api';
 import { useAuth, useCan, ROLE_LABEL } from './context/AuthContext';
 
@@ -229,6 +230,7 @@ function Shell() {
             </div>
           } />
         </Routes>
+        <FunderFooter />
       </main>
     </div>
   );

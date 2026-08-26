@@ -1312,3 +1312,70 @@ tr:hover { background: var(--bg-hover); }
 @media (max-width: 640px) {
   .toast-stack { top: auto; bottom: 16px; left: 16px; right: 16px; width: auto; }
 }
+
+/* ====== FUNDER FOOTER (pendanaan & mitra) ====== */
+.funder-footer {
+  margin-top: 40px;
+  padding: 28px 20px 24px;
+  border-top: 1px solid var(--border-primary);
+  text-align: center;
+}
+
+.funder-footer-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 8px;
+}
+
+.funder-footer-text {
+  font-size: 13px;
+  color: var(--text-secondary);
+  max-width: 620px;
+  margin: 0 auto 20px;
+  line-height: 1.6;
+}
+
+.funder-footer-logos {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 36px;
+  margin-bottom: 14px;
+}
+
+.funder-footer-logos img {
+  height: 38px;
+  width: auto;
+  object-fit: contain;
+}
+
+.funder-footer-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Varian dipakai di halaman Login (di atas gradient berwarna) -- dibungkus
+   kartu putih tembus-pandang supaya logo & teks tetap kontras, bukan
+   menempel langsung ke background gradien seperti varian "plain". */
+.funder-footer-card {
+  margin-top: 28px;
+  border-top: none;
+  background: rgba(255, 255, 255, 0.94);
+  border-radius: var(--r-lg);
+  padding: 22px 24px;
+  box-shadow: var(--shadow-lg);
+  max-width: 460px;
+}
+
+.funder-footer-card .funder-footer-text { font-size: 12.5px; margin-bottom: 16px; }
+.funder-footer-card .funder-footer-logos { gap: 22px; margin-bottom: 12px; }
+.funder-footer-card .funder-footer-logos img { height: 28px; }
+
+@media (max-width: 480px) {
+  .funder-footer-logos { gap: 22px; }
+  .funder-footer-logos img { height: 30px; }
+}
