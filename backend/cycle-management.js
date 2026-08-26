@@ -210,6 +210,33 @@ function registerCycleHandlers({ app, pool }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // ---- Update field yang bisa diedit di tengah siklus aktif (saat ini: harga jual perkiraan) ----
+  app.put('/api/ponds/:pondId/cycle', requirePondAccess('pondId'), async (req, res) => {
+    const pondId = req.params.pondId;
+    try {
+      const cr = await pool.query(
+        `SELECT cycle_id FROM pond_cycles WHERE pond_id=$1 AND status='active' ORDER BY start_date DESC LIMIT 1`, [pondId]);
+      if (!cr.rows.length) return res.status(404).json({ error: 'Tidak ada siklus aktif.' });
+
+      const { target_sell_price_per_kg } = req.body || {};
+      if (target_sell_price_per_kg === undefined) {
+        return res.status(400).json({ error: 'target_sell_price_per_kg wajib dikirim.' });
+      }
+      let price = null;
+      if (target_sell_price_per_kg !== null) {
+        price = parseFloat(target_sell_price_per_kg);
+        if (isNaN(price) || price < 0) {
+          return res.status(400).json({ error: 'target_sell_price_per_kg harus angka >= 0 atau null.' });
+        }
+      }
+
+      const r = await pool.query(
+        `UPDATE pond_cycles SET target_sell_price_per_kg=$2 WHERE cycle_id=$1 RETURNING *`,
+        [cr.rows[0].cycle_id, price]);
+      res.json(r.rows[0]);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   // ---- Daftar panen parsial siklus aktif ----
   app.get('/api/ponds/:pondId/cycle/harvests', requirePondAccess('pondId'), async (req, res) => {
     const pondId = req.params.pondId;
@@ -410,6 +437,7 @@ function registerCycleHandlers({ app, pool }) {
         [cycle.cycle_id]
       )).rows;
 
+      const hpp_per_kg = harvest_total_kg > 0 ? total_cost / harvest_total_kg : null;
       res.json({
         ...upd.rows[0],
         breakdown: {
@@ -420,6 +448,7 @@ function registerCycleHandlers({ app, pool }) {
           total_harvested_kg: r2(harvest_total_kg),
           total_harvested_fish: parseInt(totals.rows[0].total_fish) || 0,
           harvest_count: harvests.length,
+          hpp_per_kg: r2(hpp_per_kg),
         },
         harvests,
       });
@@ -640,6 +669,7 @@ function registerCycleHandlers({ app, pool }) {
       const fry_cost = parseFloat(cycle.fry_cost_total) || 0;
       const total_cost = fry_cost + feed_cost + op;
       const proj_harvest_kg = cycle.target_weight_g ? (m.population * cycle.target_weight_g) / 1000 : null;
+      const hpp_running_per_kg = m.est_biomass_kg > 0 ? total_cost / m.est_biomass_kg : null;
       res.json({
         cycle_id: cycle.cycle_id, days: m.days, population: m.population,
         avg_weight_g: m.avg_weight_g, est_biomass_kg: m.est_biomass_kg,
@@ -647,6 +677,8 @@ function registerCycleHandlers({ app, pool }) {
         fry_cost: r2(fry_cost), feed_cost: r2(feed_cost), op_cost: r2(op), total_cost: r2(total_cost),
         target_weight_g: cycle.target_weight_g != null ? parseFloat(cycle.target_weight_g) : null,
         proj_harvest_kg: r2(proj_harvest_kg),
+        hpp_running_per_kg: r2(hpp_running_per_kg),
+        target_sell_price_per_kg: cycle.target_sell_price_per_kg != null ? parseFloat(cycle.target_sell_price_per_kg) : null,
         feed_stock: fs,
       });
     } catch (e) { res.status(500).json({ error: e.message }); }
