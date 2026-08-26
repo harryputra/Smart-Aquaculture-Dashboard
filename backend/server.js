@@ -1182,24 +1182,75 @@ app.put('/api/thresholds/:pondId', requirePondAccess('pondId'), async (req, res)
 });
 
 // ----- Drain Schedules -----
+const SCHEDULE_MODES = ['duration', 'depth'];
+const SCHEDULE_TARGET_MAX_CM = 500; // selaras dengan guard kewajaran di checkValveAutoStop
+
 app.get('/api/schedules', async (req, res) => {
   try {
     const { pond_id } = req.query;
-    const q = pond_id 
-      ? `SELECT * FROM drain_schedules WHERE pond_id = $1 ORDER BY schedule_time`
-      : `SELECT * FROM drain_schedules ORDER BY schedule_time`;
-    const r = await pool.query(q, pond_id ? [pond_id] : []);
+    const conditions = [];
+    const params = [];
+    if (pond_id) { params.push(pond_id); conditions.push(`ds.pond_id = $${params.length}`); }
+    if (req.auth?.org) { params.push(req.auth.org); conditions.push(`f.org_id = $${params.length}`); }
+    const q = `SELECT ds.* FROM drain_schedules ds
+               JOIN ponds p ON ds.pond_id = p.pond_id
+               JOIN farms f ON p.farm_id = f.farm_id
+               ${conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''}
+               ORDER BY ds.schedule_time`;
+    const r = await pool.query(q, params);
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/schedules', async (req, res) => {
   try {
-    const { pond_id, schedule_time, schedule_days, duration_minutes } = req.body;
+    const {
+      pond_id, schedule_time, schedule_days,
+      mode = 'duration', duration_minutes,
+      drain_target_cm, refill_target_cm, safety_cap_minutes,
+    } = req.body;
+
+    if (!pond_id || !schedule_time || !schedule_days) {
+      return res.status(400).json({ error: 'pond_id, schedule_time, dan schedule_days wajib diisi.' });
+    }
+    if (!SCHEDULE_MODES.includes(mode)) {
+      return res.status(400).json({ error: 'mode harus "duration" atau "depth".' });
+    }
+
+    if (req.auth?.role !== 'superadmin') {
+      const own = await pool.query(
+        `SELECT 1 FROM ponds p JOIN farms f ON p.farm_id = f.farm_id
+         WHERE p.pond_id = $1 AND f.org_id = $2`, [pond_id, req.auth.org]);
+      if (!own.rows.length) return res.status(404).json({ error: 'Kolam tidak ditemukan atau bukan milik organisasi Anda.' });
+    }
+
+    let finalDurationMinutes = null;
+    let finalDrainTarget = null;
+    let finalRefillTarget = null;
+    let finalSafetyCap = null;
+
+    if (mode === 'depth') {
+      finalDrainTarget = parseFloat(drain_target_cm);
+      finalRefillTarget = parseFloat(refill_target_cm);
+      finalSafetyCap = Math.min(120, Math.max(1, parseInt(safety_cap_minutes, 10) || 30));
+      if (isNaN(finalDrainTarget) || isNaN(finalRefillTarget) || finalDrainTarget <= 0 || finalRefillTarget <= 0) {
+        return res.status(400).json({ error: 'drain_target_cm dan refill_target_cm wajib angka positif.' });
+      }
+      if (finalDrainTarget > SCHEDULE_TARGET_MAX_CM || finalRefillTarget > SCHEDULE_TARGET_MAX_CM) {
+        return res.status(400).json({ error: `Target ketinggian maksimal ${SCHEDULE_TARGET_MAX_CM}cm.` });
+      }
+      if (finalDrainTarget >= finalRefillTarget) {
+        return res.status(400).json({ error: 'Target kuras harus lebih kecil dari target isi ulang.' });
+      }
+    } else {
+      finalDurationMinutes = Math.min(120, Math.max(1, parseInt(duration_minutes, 10) || 30));
+    }
+
     const r = await pool.query(
-      `INSERT INTO drain_schedules (pond_id, schedule_time, schedule_days, duration_minutes) 
-       VALUES ($1,$2,$3,$4) RETURNING *`,
-      [pond_id, schedule_time, schedule_days, duration_minutes]
+      `INSERT INTO drain_schedules
+         (pond_id, schedule_time, schedule_days, duration_minutes, mode, drain_target_cm, refill_target_cm, safety_cap_minutes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [pond_id, schedule_time, schedule_days, finalDurationMinutes, mode, finalDrainTarget, finalRefillTarget, finalSafetyCap]
     );
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1207,6 +1258,14 @@ app.post('/api/schedules', async (req, res) => {
 
 app.delete('/api/schedules/:id', async (req, res) => {
   try {
+    if (req.auth?.role !== 'superadmin') {
+      const own = await pool.query(
+        `SELECT 1 FROM drain_schedules ds
+         JOIN ponds p ON ds.pond_id = p.pond_id
+         JOIN farms f ON p.farm_id = f.farm_id
+         WHERE ds.id = $1 AND f.org_id = $2`, [req.params.id, req.auth.org]);
+      if (!own.rows.length) return res.status(404).json({ error: 'Jadwal tidak ditemukan atau bukan milik organisasi Anda.' });
+    }
     await pool.query(`DELETE FROM drain_schedules WHERE id = $1`, [req.params.id]);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
