@@ -174,22 +174,26 @@ export default function CycleTab({ pondId, onChange }) {
             <table className="table">
               <thead><tr>
                 <th>Periode</th><th>Status</th><th>Panen</th><th>Total (kg)</th>
-                <th>SR</th><th>FCR</th><th>Revenue</th><th>Profit</th><th>ROI</th>
+                <th>SR</th><th>FCR</th><th>Revenue</th><th>Profit</th><th>ROI</th><th>HPP/kg</th>
               </tr></thead>
               <tbody>
-                {completed.map(c => (
-                  <tr key={c.cycle_id}>
-                    <td>{fdate(c.start_date)} → {fdate(c.harvest_date)}</td>
-                    <td><span className={`badge ${c.status === 'completed' ? 'badge-success' : 'badge-neutral'}`}>{c.status === 'completed' ? 'Panen' : 'Batal'}</span></td>
-                    <td>{c.partial_harvest_count ? `${c.partial_harvest_count}×` : '-'}</td>
-                    <td>{c.harvest_total_kg ? `${fnum(c.harvest_total_kg)} kg` : '-'}</td>
-                    <td>{c.survival_rate != null ? `${c.survival_rate}%` : '-'}</td>
-                    <td>{c.fcr ?? '-'}</td>
-                    <td>{rupiah(c.harvest_revenue)}</td>
-                    <td style={{ color: c.profit >= 0 ? 'var(--success)' : 'var(--danger)', fontWeight: 600 }}>{rupiah(c.profit)}</td>
-                    <td>{c.roi != null ? `${c.roi}%` : '-'}</td>
-                  </tr>
-                ))}
+                {completed.map(c => {
+                  const hppKg = (c.total_cost && c.harvest_total_kg) ? (parseFloat(c.total_cost) / parseFloat(c.harvest_total_kg)) : null;
+                  return (
+                    <tr key={c.cycle_id}>
+                      <td>{fdate(c.start_date)} → {fdate(c.harvest_date)}</td>
+                      <td><span className={`badge ${c.status === 'completed' ? 'badge-success' : 'badge-neutral'}`}>{c.status === 'completed' ? 'Panen' : 'Batal'}</span></td>
+                      <td>{c.partial_harvest_count ? `${c.partial_harvest_count}×` : '-'}</td>
+                      <td>{c.harvest_total_kg ? `${fnum(c.harvest_total_kg)} kg` : '-'}</td>
+                      <td>{c.survival_rate != null ? `${c.survival_rate}%` : '-'}</td>
+                      <td>{c.fcr ?? '-'}</td>
+                      <td>{rupiah(c.harvest_revenue)}</td>
+                      <td style={{ color: c.profit >= 0 ? 'var(--success)' : 'var(--danger)', fontWeight: 600 }}>{rupiah(c.profit)}</td>
+                      <td>{c.roi != null ? `${c.roi}%` : '-'}</td>
+                      <td>{hppKg != null ? `${rupiah(hppKg)}/kg` : '-'}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -525,6 +529,7 @@ function FinalHarvestModal({ pondId, cycle, harvests, onClose, onDone }) {
               <Row k="Biaya pakan"         v={rupiah(b.feed_cost)} />
               <Row k="Biaya operasional"   v={rupiah(b.op_cost)} />
               <Row k="Total biaya"         v={rupiah(b.total_cost)} />
+              <Row k="HPP per kg"          v={b.hpp_per_kg != null ? `${rupiah(b.hpp_per_kg)}/kg` : '-'} />
             </tbody>
           </table>
           <div className="modal-actions"><button className="btn btn-primary" onClick={onDone}>Selesai</button></div>
