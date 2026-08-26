@@ -212,6 +212,7 @@ MIGRATIONS=(
   database/migration-feed-plan.sql
   database/migration-water-devices.sql
   database/migration-rtc-lostpower.sql
+  database/migration-drain-schedule-depth.sql
 )
 apply_migrations() {
   load_env
