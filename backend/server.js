@@ -1232,7 +1232,8 @@ app.post('/api/schedules', async (req, res) => {
     if (mode === 'depth') {
       finalDrainTarget = parseFloat(drain_target_cm);
       finalRefillTarget = parseFloat(refill_target_cm);
-      finalSafetyCap = Math.min(120, Math.max(1, parseInt(safety_cap_minutes, 10) || 30));
+      const parsedSafetyCap = parseInt(safety_cap_minutes, 10);
+      finalSafetyCap = Math.min(120, Math.max(1, Number.isFinite(parsedSafetyCap) ? parsedSafetyCap : 30));
       if (isNaN(finalDrainTarget) || isNaN(finalRefillTarget) || finalDrainTarget <= 0 || finalRefillTarget <= 0) {
         return res.status(400).json({ error: 'drain_target_cm dan refill_target_cm wajib angka positif.' });
       }
@@ -1243,7 +1244,8 @@ app.post('/api/schedules', async (req, res) => {
         return res.status(400).json({ error: 'Target kuras harus lebih kecil dari target isi ulang.' });
       }
     } else {
-      finalDurationMinutes = Math.min(120, Math.max(1, parseInt(duration_minutes, 10) || 30));
+      const parsedDuration = parseInt(duration_minutes, 10);
+      finalDurationMinutes = Math.min(120, Math.max(1, Number.isFinite(parsedDuration) ? parsedDuration : 30));
     }
 
     const r = await pool.query(
