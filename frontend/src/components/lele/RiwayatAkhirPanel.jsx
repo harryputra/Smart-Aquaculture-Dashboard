@@ -74,6 +74,8 @@ export default function RiwayatAkhirPanel({ device }) {
             <FinBox label="Biaya Operasional" value={rupiah(fin.op_cost)} />
             <FinBox label="Biaya Benih" value={rupiah(fin.fry_cost)} />
             <FinBox label="Total Biaya" value={rupiah(fin.total_cost)} strong />
+            <FinBox label="HPP Berjalan" value={fin.hpp_running_per_kg != null ? `${rupiah(fin.hpp_running_per_kg)}/kg` : '-'}
+              sub="Estimasi, berubah sampai panen" />
             <FinBox label="Biomassa Saat Ini" value={`${fin.est_biomass_kg.toLocaleString('id-ID')} kg`}
               sub={`${fin.avg_weight_g} g/ekor × ${fin.population.toLocaleString('id-ID')} ekor`} />
             <FinBox label="Prediksi Panen" value={`${fin.proj_harvest_kg.toLocaleString('id-ID')} kg`}
