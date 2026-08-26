@@ -213,6 +213,7 @@ MIGRATIONS=(
   database/migration-water-devices.sql
   database/migration-rtc-lostpower.sql
   database/migration-drain-schedule-depth.sql
+  database/migration-hpp-sellprice.sql
 )
 apply_migrations() {
   load_env

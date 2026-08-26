@@ -134,6 +134,7 @@ call :runsql migration-feed-plan.sql
 call :runsql migration-water-devices.sql
 call :runsql migration-rtc-lostpower.sql
 call :runsql migration-drain-schedule-depth.sql
+call :runsql migration-hpp-sellprice.sql
 echo [..] Restart backend (seed admin/demo setelah tabel ada)...
 %DC% restart backend >nul 2>&1
 echo [OK] Migrasi selesai.
