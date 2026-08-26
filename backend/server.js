@@ -133,6 +133,7 @@ const drainStates = {}; // { pond_id: { draining: bool, refilling: bool, startTi
 // sama seperti drainStates/triggerAutoDrainCycle di atas.
 const valveAutoStop = {};
 const VALVE_SAFETY_CAP_MS = 15 * 60 * 1000; // batas pengaman keras, berlaku di SEMUA mode
+const VALVE_SAFETY_CAP_MIN = VALVE_SAFETY_CAP_MS / 60000;
 
 function valveTopic(farm_id, pond_id) {
   return `aquaculture/${farm_id}/${pond_id}/control`;
@@ -163,7 +164,7 @@ async function forceCloseValve(pond_id, valveKind, reasonCode) {
   const REASON_TEXT = {
     depth_reached: () => `Auto-stop: ketinggian target ${Number(watch?.targetDepth).toFixed(1)}cm tercapai`,
     duration: () => `Auto-stop: durasi ${watch?.durationMinutes} menit habis`,
-    safety_cap: () => `Auto-stop: batas pengaman ${Number(watch?.safetyCapMinutes ?? 15)} menit tercapai (kondisi target tak tercapai)`,
+    safety_cap: () => `Auto-stop: batas pengaman ${Number(watch?.safetyCapMinutes ?? VALVE_SAFETY_CAP_MIN)} menit tercapai (kondisi target tak tercapai)`,
   };
   const reason = (REASON_TEXT[reasonCode] || (() => 'Auto-stop'))();
   const action = valveKind === 'drain' ? 'valve_close' : 'inlet_close';
@@ -175,8 +176,14 @@ async function forceCloseValve(pond_id, valveKind, reasonCode) {
 
   // Hook opsional dipakai siklus terjadwal (chaining kuras->isi ulang, notifikasi).
   // Watch manual (Kontrol Air) tidak pernah set ini -> no-op, perilaku lama tak berubah.
+  // CATATAN: onClosed menandakan "perintah tutup sudah dipublish MQTT & tercatat",
+  // BUKAN konfirmasi fisik katup benar-benar tertutup (device tidak melapor balik
+  // status relay -- sudah begitu sejak fitur Kontrol Air awal). Task yang memakai
+  // hook ini untuk mengantai aksi berikutnya (mis. buka katup lain) perlu sadar
+  // keterbatasan ini.
   if (watch.onClosed) {
-    await watch.onClosed(reasonCode).catch(err => console.error('valve onClosed hook failed:', err.message));
+    try { await watch.onClosed(reasonCode); }
+    catch (err) { console.error('valve onClosed hook failed:', err?.message || err); }
   }
 }
 
@@ -801,7 +808,7 @@ app.post('/api/control/:pondId/valve', requirePondAccess('pondId'), async (req, 
           targetDepth: plan.targetDepth,
           durationMinutes: plan.durationMinutes,
           startedAt: new Date(),
-          safetyCapMinutes: VALVE_SAFETY_CAP_MS / 60000,
+          safetyCapMinutes: VALVE_SAFETY_CAP_MIN,
           safetyTimer: setTimeout(
             () => forceCloseValve(pond_id, valveKind, 'safety_cap')
               .catch(err => console.error('forceCloseValve (safety_cap) failed:', err.message)),
@@ -836,7 +843,7 @@ app.post('/api/control/:pondId/valve', requirePondAccess('pondId'), async (req, 
             targetDepth: null,
             durationMinutes: null,
             startedAt: new Date(),
-            safetyCapMinutes: VALVE_SAFETY_CAP_MS / 60000,
+            safetyCapMinutes: VALVE_SAFETY_CAP_MIN,
             safetyTimer: setTimeout(
               () => forceCloseValve(pond_id, valveKind, 'safety_cap')
                 .catch(err => console.error('forceCloseValve (safety_cap) failed:', err.message)),
