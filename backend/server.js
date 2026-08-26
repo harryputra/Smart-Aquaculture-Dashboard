@@ -214,7 +214,8 @@ async function runScheduledDrainCycle(schedule) {
   if (mode === 'depth') {
     const latest = latestData[pond_id];
     const freshMs = latest ? Date.now() - new Date(latest.timestamp).getTime() : Infinity;
-    if (!latest || latest.depth == null || isNaN(parseFloat(latest.depth)) || freshMs > 30000) {
+    const latestDepthNum = latest ? parseFloat(latest.depth) : NaN;
+    if (!latest || latest.depth == null || isNaN(latestDepthNum) || latestDepthNum < 0 || latestDepthNum > 500 || freshMs > 30000) {
       await pool.query(
         `INSERT INTO notifications (pond_id, type, category, title, message)
          VALUES ($1,'risk','system',$2,$3)`,
@@ -286,6 +287,7 @@ async function runScheduledDrainCycle(schedule) {
            `Ketinggian ${drainTarget.toFixed(1)}cm tercapai, katup kuras ditutup otomatis. Lanjut isi ulang ke ${refillTarget.toFixed(1)}cm.`]
         ).catch(() => {});
 
+        clearValveWatch(pond_id, 'inlet');
         mqttClient.publish(valveTopic(farm_id, pond_id), JSON.stringify({ command: 'open_inlet', source: 'schedule' }));
 
         valveAutoStop[`${pond_id}:inlet`] = {
