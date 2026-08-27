@@ -65,13 +65,21 @@
 #define NTU_MAKSIMAL       1000.0f
 
 #define TINGGI_TABUNG_AIR_CM   100.0
+// Kalibrasi kedalaman air: dashboard terbaca ~49-50cm saat ketinggian air
+// aktual sebenarnya 60cm (dicek manual 27 Agu 2026) -> sensor ultrasonik
+// konsisten kurang ~10cm (kemungkinan sensor terpasang lebih rendah/tinggi
+// dari asumsi TINGGI_TABUNG_AIR_CM, atau ada standoff pemasangan). Offset
+// ini ditambahkan ke hasil akhir levelAir, BUKAN menimpa TINGGI_TABUNG_AIR_CM,
+// supaya angka geometri asli & koreksi kalibrasi tetap terpisah & mudah
+// disesuaikan lagi nanti kalau ternyata masih meleset.
+#define DEPTH_KALIBRASI_CM     10.0
 #define TINGGI_WADAH_PAKAN_CM  30.0
 
 #define PUBLISH_INTERVAL_MS    3000
 
 // ------------------ OTA Configuration -------------------
 // Host self-check/unduh OTA = domain dashboard ini (SAMA dengan feeder v3.9).
-#define FIRMWARE_VERSION  "2.0.0"   // model device-id + OTA sha256 diperbaiki
+#define FIRMWARE_VERSION  "2.0.1"   // kalibrasi kedalaman air (+10cm offset)
 #define OTA_API_HOST_V2   "aquaculture.trin-polman.id"
 
 #endif

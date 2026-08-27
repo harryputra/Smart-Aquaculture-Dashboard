@@ -252,7 +252,7 @@ void bacaSemuaSensor() {
   jarakAir = bacaJarak(TRIG_AIR, ECHO_AIR);
   delay(30);
   jarakPakan = bacaJarak(TRIG_PAKAN, ECHO_PAKAN);
-  levelAir   = (jarakAir   >= 0) ? max(0.0f, (float)TINGGI_TABUNG_AIR_CM  - jarakAir)   : -1;
+  levelAir   = (jarakAir   >= 0) ? max(0.0f, (float)TINGGI_TABUNG_AIR_CM  - jarakAir + DEPTH_KALIBRASI_CM) : -1;
   levelPakan = (jarakPakan >= 0) ? max(0.0f, (float)TINGGI_WADAH_PAKAN_CM - jarakPakan) : -1;
 }
 
