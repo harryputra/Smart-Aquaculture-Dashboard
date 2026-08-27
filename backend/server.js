@@ -386,6 +386,23 @@ mqttClient.on('message', async (topic, message) => {
     // & dicek ambangnya (kalau tidak, kolom DO dari node ini selalu kosong).
     if (payload.dissolved_oxygen == null && payload.do != null) payload.dissolved_oxygen = payload.do;
 
+    // KOREKSI SEMENTARA kalibrasi sensor kedalaman pond_c1_tunas: dashboard
+    // terbaca ~49-50cm padahal ketinggian air aktual 60cm (dicek manual,
+    // 27 Agu 2026). Firmware sudah diperbaiki (v2.0.1, DEPTH_KALIBRASI_CM di
+    // Parameter.h) tapi device belum bisa di-OTA (belum ada akses fisik ke
+    // lokasi). Tempel offset di sini -- SEBELUM latestData/saveSensorData/
+    // checkSensorRisks/checkValveAutoStop -- supaya SEMUA konsumen (dashboard,
+    // deteksi risiko, auto-stop kuras berbasis ketinggian) konsisten memakai
+    // angka yang sudah terkoreksi, bukan cuma yang tampil di layar.
+    // Guard `>= 0` sengaja ada supaya sentinel error firmware (depth = -1,
+    // artinya sensor gagal baca) tidak ikut ditambah jadi seolah-olah angka
+    // valid kecil (-1 + 10 = 9).
+    // WAJIB DIHAPUS setelah device ini berhasil di-OTA ke firmware >= 2.0.1,
+    // supaya tidak dobel-koreksi (+10cm firmware + +10cm sini = +20cm).
+    if (pond_id === 'pond_c1_tunas' && payload.depth != null && payload.depth >= 0) {
+      payload.depth = payload.depth + 10;
+    }
+
     if (type === 'sensors') {
       latestData[pond_id] = { ...payload, farm_id, pond_id, timestamp: new Date() };
 
