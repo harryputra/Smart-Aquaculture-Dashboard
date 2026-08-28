@@ -23,6 +23,15 @@ const dailyNeedG = (p) =>
   Math.max(0, Math.round((Number(p.fish_count) || 0) * (Number(p.avg_weight_g) || 0) * (Number(p.feeding_rate_percent) || 0) / 100));
 
 const clampFeed = (g) => Math.min(5000, Math.max(0, Math.round(g)));
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Jeda antar publish MQTT config schedule_index saat push Rencana Pakan ke
+// feeder v3.9+. Firmware menulis tiap config yang diterima ke flash (NVS)
+// secara blocking (~puluhan field per schedule_index) -- kalau beberapa pesan
+// dikirim beruntun tanpa jeda, ada risiko salah satu tertunda/tidak terproses
+// sebelum pesan berikutnya datang. 400ms cukup longgar tanpa membuat proses
+// Simpan Rencana terasa lambat (maks 6 slot x 400ms = 2.4 detik).
+const SCHEDULE_PUSH_DELAY_MS = 400;
 
 // Firmware >= 3.9.0 = mampu distribusi persen OFFLINE (onboard, via scheduleGram).
 // Untuk device ini dashboard push GRAM per slot + auto_feed ON, dan cron TIDAK
@@ -135,18 +144,35 @@ function registerFeedPlanHandlers({ app, pool, leleMqttClient }) {
             const daily = dailyNeedG(plan);
             const act = rows.filter((s) => s.enabled !== false && /^\d{2}:\d{2}$/.test(String(s.session_time).slice(0, 5)))
               .sort((a, b) => String(a.session_time).localeCompare(String(b.session_time))).slice(0, 6);
-            if (act.length) cfg({ feeding_per_day: act.length });
             if (isOfflineCap(dev.firmware_version)) {
-              // v3.9+: feeder memberi pakan OFFLINE. Push jam + GRAM per slot + auto_feed ON.
-              // Cron dashboard SKIP device ini (biar tak dobel) — lihat cron di bawah.
+              // v3.9+: feeder memberi pakan OFFLINE dgn jam presisi per-sesi dari
+              // Rencana Pakan. SENGAJA TIDAK kirim `feeding_per_day` di jalur ini --
+              // firmware men-generate ULANG SEMUA jam pakai rumus bawaan (sebar rata
+              // 07:00-17:00) begitu menerima field itu, MENIMPA jam presisi yang baru
+              // saja/segera kita kirim lewat schedule_index di bawah. Kalau salah satu
+              // pesan schedule_index telat/gagal diproses (mis. dikirim beruntun tanpa
+              // jeda dulu), slot itu tertinggal di jam hasil auto-generate (mis. 17:00)
+              // — BUKAN jam yang user atur — dan kalau jam itu sudah lewat hari itu,
+              // sesi tsb diam total sampai besok. `feeding_per_day` adalah sisa dari
+              // cara lama sebelum ada Rencana Pakan presisi, tidak relevan lagi utk
+              // device kelas ini. Jeda SCHEDULE_PUSH_DELAY_MS antar publish juga
+              // mengurangi risiko pesan tertunda krn firmware menulis tiap config yg
+              // diterima ke flash (NVS) secara blocking.
               cmd({ command: 'set_auto_feed', enabled: true });
-              act.forEach((s, i) => {
-                const [h, m] = String(s.session_time).slice(0, 5).split(':').map(Number);
-                cfg({ schedule_index: i, hour: h, minute: m, enabled: true, gram: clampFeed(daily * (Number(s.percent) || 0) / 100) });
-              });
-              for (let i = act.length; i < 6; i++) cfg({ schedule_index: i, enabled: false, gram: 0 });
+              for (let i = 0; i < act.length; i++) {
+                const [h, m] = String(act[i].session_time).slice(0, 5).split(':').map(Number);
+                cfg({ schedule_index: i, hour: h, minute: m, enabled: true, gram: clampFeed(daily * (Number(act[i].percent) || 0) / 100) });
+                await sleep(SCHEDULE_PUSH_DELAY_MS);
+              }
+              for (let i = act.length; i < 6; i++) {
+                cfg({ schedule_index: i, enabled: false, gram: 0 });
+                await sleep(SCHEDULE_PUSH_DELAY_MS);
+              }
             } else {
-              // < v3.9: online-driven. Matikan auto_feed onboard; cron kirim manual_feed_gram.
+              // < v3.9: online-driven, alat generate jadwal sendiri dari feeding_per_day
+              // (jam presisi tak didukung firmware ini) — cron dashboard yg kirim
+              // manual_feed_gram di jam yang benar, jadi tidak kena race yang sama.
+              if (act.length) cfg({ feeding_per_day: act.length });
               cmd({ command: 'set_auto_feed', enabled: false });
               act.forEach((s, i) => {
                 const [h, m] = String(s.session_time).slice(0, 5).split(':').map(Number);

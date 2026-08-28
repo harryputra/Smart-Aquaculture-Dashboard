@@ -4,6 +4,7 @@ import {
   Check, RefreshCw, Zap, Calculator,
 } from 'lucide-react';
 import { getFeedPlan, saveFeedPlan, getFeedPlanLastSampling, testFeedPlanSession } from '../services/api';
+import { getSyncedSchedules } from '../services/leleApi';
 
 const DEFAULT_SESSIONS = [
   { session_name: 'Pagi', session_time: '09:00', percent: 20, enabled: true },
@@ -30,6 +31,7 @@ export default function FeedPlanCard({ pondId, device }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [verify, setVerify] = useState(null);   // null | {status:'checking'|'ok'|'mismatch'|'error', mismatches?}
 
   async function load() {
     setLoading(true);
@@ -86,11 +88,37 @@ export default function FeedPlanCard({ pondId, device }) {
   }
 
   async function save() {
-    setSaving(true); setMsg(null);
+    setSaving(true); setMsg(null); setVerify(null);
     try {
       await saveFeedPlan(pondId, { ...plan, sessions });
       setMsg({ kind: 'ok', text: 'Rencana pakan tersimpan. Feeder akan diberi pakan sesuai porsi di tiap jam sesi.' });
+      if (isOfflineCapableFw(device?.firmware_version) && device?.device_id) verifySync();
     } catch (e) { setMsg({ kind: 'err', text: e.message }); } finally { setSaving(false); }
+  }
+
+  // Cek apakah jam yang baru disimpan BENAR-BENAR tersimpan di alat (bukan cuma
+  // di database) — device melapor balik jadwalnya sendiri lewat status berkala,
+  // dan backend menyimpannya di lele_device_schedules. Beri jeda dulu supaya
+  // alat sempat terima & lapor balik semua pesan config yang baru dikirim.
+  async function verifySync() {
+    setVerify({ status: 'checking' });
+    await new Promise((r) => setTimeout(r, 2500));
+    try {
+      const synced = await getSyncedSchedules(device.device_id);
+      const enabledSorted = [...sessions]
+        .filter((s) => s.enabled !== false && /^\d{2}:\d{2}$/.test(s.session_time || ''))
+        .sort((a, b) => String(a.session_time).localeCompare(String(b.session_time)))
+        .slice(0, 6);
+      const mismatches = [];
+      enabledSorted.forEach((s, i) => {
+        const [h, m] = s.session_time.split(':').map(Number);
+        const sync = synced.find((x) => x.schedule_index === i);
+        if (!sync || !sync.enabled || Number(sync.hour) !== h || Number(sync.minute) !== m) {
+          mismatches.push(s.session_name || `Sesi ${i + 1}`);
+        }
+      });
+      setVerify(mismatches.length ? { status: 'mismatch', mismatches } : { status: 'ok' });
+    } catch (e) { setVerify({ status: 'error' }); }
   }
 
   async function testFeed(pct, name) {
@@ -188,6 +216,25 @@ export default function FeedPlanCard({ pondId, device }) {
           background: msg.kind === 'ok' ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)',
           color: msg.kind === 'ok' ? '#15803d' : '#b91c1c', border: `1px solid ${msg.kind === 'ok' ? '#22c55e' : '#ef4444'}` }}>
           {msg.text}
+        </div>
+      )}
+
+      {verify && (
+        <div style={{ marginTop: 8, padding: '9px 12px', borderRadius: 9, fontSize: 13, fontWeight: 600,
+          background: verify.status === 'ok' ? 'rgba(34,197,94,0.12)' : verify.status === 'checking' ? 'var(--bg-elevated)' : 'rgba(239,68,68,0.12)',
+          color: verify.status === 'ok' ? '#15803d' : verify.status === 'checking' ? 'var(--text-secondary)' : '#b91c1c',
+          border: `1px solid ${verify.status === 'ok' ? '#22c55e' : verify.status === 'checking' ? 'var(--border-primary)' : '#ef4444'}`,
+          display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+          {verify.status === 'checking' && <>🔄 Memverifikasi tersimpan di alat…</>}
+          {verify.status === 'ok' && <><Check size={14} style={{ flexShrink: 0, marginTop: 1 }} /> Terverifikasi: semua sesi sudah dikonfirmasi tersimpan di alat.</>}
+          {verify.status === 'mismatch' && (
+            <>
+              <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+              Alat belum mengonfirmasi jam yang benar untuk sesi: <strong>{verify.mismatches.join(', ')}</strong>.
+              Coba klik Simpan Rencana sekali lagi (pastikan alat online/tersambung).
+            </>
+          )}
+          {verify.status === 'error' && <>Tidak bisa memeriksa status alat sekarang — cek manual di tab Diagnostik.</>}
         </div>
       )}
 
