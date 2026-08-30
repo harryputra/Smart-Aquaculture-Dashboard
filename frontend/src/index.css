@@ -635,7 +635,8 @@ code, .mono { font-family: 'JetBrains Mono', monospace; }
   background: var(--bg-card);
   border: 1px solid var(--border-primary);
   border-radius: var(--r-md);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 table {
