@@ -95,13 +95,24 @@ Tampilkan teks "Menampilkan X–Y dari Z baris", dropdown ukuran halaman
 
 Props: `{ data, columns, filename, sheetName = 'Data' }`, dengan
 `columns: Array<{ header: string, accessor: string | (row) => any }>`.
-Pakai library `xlsx` (SheetJS) — `XLSX.utils.json_to_sheet` dari data yang
-sudah dipetakan lewat `columns` (supaya kolom Excel punya nama manusiawi &
-nilai sudah diformat sama seperti yang tampil di tabel, bukan field mentah
-database), lalu `XLSX.writeFile(wb, filename)`. Tombol disabled kalau
-`data.length === 0`.
+Pakai library `exceljs` — `Workbook.addWorksheet()` + `worksheet.addRow()`
+dari data yang sudah dipetakan lewat `columns` (supaya kolom Excel punya nama
+manusiawi & nilai sudah diformat sama seperti yang tampil di tabel, bukan
+field mentah database), lalu `workbook.xlsx.writeBuffer()` diubah jadi Blob
+dan diunduh lewat elemen `<a download>` sementara. Tombol disabled saat
+proses berjalan atau `data.length === 0`.
 
-Tambah dependency baru: `xlsx` di `frontend/package.json`.
+Tambah dependency baru: `exceljs` di `frontend/package.json`.
+
+**Catatan keamanan (ditemukan saat implementasi, bukan saat brainstorming):**
+Rencana awal memakai `xlsx`/SheetJS. `npm audit` menemukan versi `xlsx` yang
+ter-resolve dari npm registry punya 2 kerentanan **HIGH** — Prototype
+Pollution (GHSA-4r6h-8v6p-xvw6) dan ReDoS (GHSA-5pgg-2g8v-p4x9) — **tanpa fix
+tersedia**. Diganti ke `exceljs`, yang sudah dipakai & dipercaya di
+`backend/package.json`, hanya membawa 1 kerentanan transitif moderate (uuid,
+lewat jalur pemakaian buffer eksternal yang tidak dipakai exceljs secara
+internal), dan sudah diverifikasi bisa di-bundle untuk browser. Perilaku
+akhir untuk user tidak berubah — tetap mengunduh file `.xlsx` yang sama.
 
 ### 4. Modifikasi `frontend/src/components/lele/RiwayatAkhirPanel.jsx`
 

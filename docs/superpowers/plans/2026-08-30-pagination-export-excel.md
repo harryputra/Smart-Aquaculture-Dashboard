@@ -4,24 +4,26 @@
 
 **Goal:** Bangun hook pagination + komponen kontrol halaman + tombol export Excel yang bisa dipakai ulang, lalu terapkan ke kelima sub-tab `RiwayatAkhirPanel.jsx` (Sesi Pakan, Batch Detail, Riwayat Sampling, Detail per Ikan, Error) sebagai percontohan sebelum digulirkan ke tabel lain di aplikasi.
 
-**Architecture:** Pagination murni di sisi browser (client-side) — data sudah dimuat penuh oleh komponen yang ada, tinggal dipotong per halaman saat render. Export Excel juga sepenuhnya di browser (library `xlsx`/SheetJS), mengekspor SELURUH data yang dimuat (bukan cuma halaman aktif), tidak butuh endpoint backend baru.
+**Architecture:** Pagination murni di sisi browser (client-side) — data sudah dimuat penuh oleh komponen yang ada, tinggal dipotong per halaman saat render. Export Excel juga sepenuhnya di browser (library `exceljs`), mengekspor SELURUH data yang dimuat (bukan cuma halaman aktif), tidak butuh endpoint backend baru.
 
-**Tech Stack:** React (hooks), `xlsx` (SheetJS, baru) — tanpa framework test otomatis (codebase ini tidak punya test suite; verifikasi lewat `npm run build` dan pengecekan manual di browser).
+**Tech Stack:** React (hooks), `exceljs` (baru — lihat catatan library di bawah) — tanpa framework test otomatis (codebase ini tidak punya test suite; verifikasi lewat `npm run build` dan pengecekan manual di browser).
+
+**Catatan pemilihan library export:** Spec awal menyebut `xlsx`/SheetJS. Saat implementasi, `npm audit` menemukan paket `xlsx` versi registry npm punya 2 kerentanan **HIGH** ("Prototype Pollution", "ReDoS") **tanpa fix tersedia**. Diganti ke `exceljs` — sudah dipakai & terpercaya di `backend/package.json`, hanya membawa 1 kerentanan moderate transitif (uuid, jalur pemakaian tidak relevan untuk exceljs), dan sudah diverifikasi bundling bersih untuk browser (esbuild `--platform=browser`, exit 0). Hasil akhir untuk user tidak berubah (tetap file `.xlsx`); hanya API internal komponen `ExportExcelButton` yang beda (async `workbook.xlsx.writeBuffer()` + trigger unduh manual via Blob, bukan `XLSX.writeFile` satu baris).
 
 Spec lengkap: `docs/superpowers/specs/2026-08-30-pagination-export-excel-design.md`
 
 ---
 
-### Task 1: Dependency `xlsx` + hook `usePagination`
+### Task 1: Dependency `exceljs` + hook `usePagination`
 
 **Files:**
 - Modify: `frontend/package.json` (tambah dependency)
 - Create: `frontend/src/hooks/usePagination.js`
 
-- [ ] **Step 1: Tambah dependency `xlsx`**
+- [ ] **Step 1: Tambah dependency `exceljs`**
 
-Run: `cd frontend && npm install xlsx`
-Expected: `package.json` dan `package-lock.json` ter-update dengan entry `xlsx` baru (versi apa pun yang ter-resolve dari npm registry saat ini — jangan pin manual). Setelah install, jalankan `npm audit` dan pastikan tidak ada laporan HIGH/CRITICAL baru yang berasal dari paket ini.
+Run: `cd frontend && npm install exceljs`
+Expected: `package.json` dan `package-lock.json` ter-update dengan entry `exceljs` baru (versi apa pun yang ter-resolve dari npm registry saat ini — jangan pin manual). Setelah install, jalankan `npm audit` dan pastikan tidak ada laporan HIGH/CRITICAL baru yang berasal dari paket ini (paket `xlsx`/SheetJS SUDAH DICOBA dan DITOLAK karena 2 kerentanan HIGH tanpa fix — lihat catatan library di atas; jangan install ulang `xlsx`).
 
 - [ ] **Step 2: Buat folder `frontend/src/hooks/` dan file `usePagination.js`**
 
@@ -64,7 +66,7 @@ Expected: tidak ada output/error (verifikasi file terbaca bersih; verifikasi sin
 
 ```bash
 git add frontend/package.json frontend/package-lock.json frontend/src/hooks/usePagination.js
-git commit -m "feat(tabel): tambah dependency xlsx + hook usePagination"
+git commit -m "feat(tabel): tambah dependency exceljs + hook usePagination"
 ```
 
 ---
@@ -139,30 +141,55 @@ git commit -m "feat(tabel): komponen PaginationControls"
 - [ ] **Step 1: Buat file**
 
 ```jsx
-import * as XLSX from 'xlsx';
+import { useState } from 'react';
+import ExcelJS from 'exceljs';
 import { FileSpreadsheet } from 'lucide-react';
 
 // `columns`: Array<{ header: string, accessor: string | (row) => any }>
 // `data` HARUS array penuh (bukan hasil pagination) -- export selalu
 // mencakup semua baris terlepas dari halaman yang sedang dilihat user.
+//
+// Pakai `exceljs`, BUKAN `xlsx`/SheetJS -- versi `xlsx` di npm registry
+// punya 2 kerentanan HIGH (Prototype Pollution, ReDoS) tanpa fix tersedia.
+// `exceljs` tidak punya helper unduh built-in seperti `XLSX.writeFile`,
+// jadi unduhan dipicu manual lewat Blob + object URL.
 export default function ExportExcelButton({ data, columns, filename, sheetName = 'Data' }) {
-  function handleExport() {
-    const rows = data.map((row) => {
-      const out = {};
-      columns.forEach((col) => {
-        out[col.header] = typeof col.accessor === 'function' ? col.accessor(row) : row[col.accessor];
+  const [busy, setBusy] = useState(false);
+
+  async function handleExport() {
+    setBusy(true);
+    try {
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet(sheetName);
+      ws.columns = columns.map((col) => ({ header: col.header, key: col.header, width: 22 }));
+      data.forEach((row) => {
+        const out = {};
+        columns.forEach((col) => {
+          out[col.header] = typeof col.accessor === 'function' ? col.accessor(row) : row[col.accessor];
+        });
+        ws.addRow(out);
       });
-      return out;
-    });
-    const ws = XLSX.utils.json_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, sheetName);
-    XLSX.writeFile(wb, filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`);
+      ws.getRow(1).font = { bold: true };
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const finalName = filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`;
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = finalName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
-    <button type="button" className="btn btn-secondary btn-sm" onClick={handleExport} disabled={!data || data.length === 0}>
-      <FileSpreadsheet size={14} /> Export Excel
+    <button type="button" className="btn btn-secondary btn-sm" onClick={handleExport} disabled={busy || !data || data.length === 0}>
+      <FileSpreadsheet size={14} /> {busy ? 'Menyiapkan...' : 'Export Excel'}
     </button>
   );
 }
@@ -611,7 +638,7 @@ Ganti jadi:
 - [ ] **Step 8: Verifikasi build**
 
 Run: `cd frontend && npm run build`
-Expected: build sukses tanpa error (khususnya import `xlsx`, `usePagination`, `PaginationControls`, `ExportExcelButton` semua terselesaikan dengan benar).
+Expected: build sukses tanpa error (khususnya import `exceljs`, `usePagination`, `PaginationControls`, `ExportExcelButton` semua terselesaikan dengan benar).
 
 - [ ] **Step 9: Commit**
 
