@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react';
 import { CheckCircle, XCircle, AlertTriangle, Calendar, History, Scale, Bug, Fish, Wallet, TrendingUp } from 'lucide-react';
 import { getLeleSessions, getLeleErrors, getLeleBiomassSummary, getLeleBiomassSamples } from '../../services/leleApi';
 import { getFinancial } from '../../services/api';
+import { usePagination } from '../../hooks/usePagination';
+import PaginationControls from '../PaginationControls';
+import ExportExcelButton from '../ExportExcelButton';
 
 const rupiah = (n) => (n == null ? '-' :
   new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n));
@@ -55,6 +58,14 @@ export default function RiwayatAkhirPanel({ device }) {
   const samplesFlat = samplingSessions.flatMap((group, idx) =>
     group.map(s => ({ ...s, session_label: `Sesi ${samplingSessions.length - idx}` }))
   );
+
+  const sessionsPg = usePagination(sessions, 25);
+  const batchPg = usePagination(sessionsBatched, 25);
+  const samplingPg = usePagination(summaries, 25);
+  const fishPg = usePagination(samplesFlat, 25);
+  const errorsPg = usePagination(errors, 25);
+
+  const feedStatusText = (s) => s.success ? 'Sukses' : (s.completed_at ? 'Gagal' : 'Berjalan');
 
   return (
     <>
@@ -177,117 +188,203 @@ export default function RiwayatAkhirPanel({ device }) {
         {activeTab === 'summary' && (sessions.length === 0 ? (
           <div className="empty-state"><p>Belum ada sesi feeding</p></div>
         ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr><th>Mulai</th><th>Sesi</th><th>Target (g)</th><th>Aktual (g)</th><th>Batch</th><th>Status</th></tr>
-              </thead>
-              <tbody>
-                {sessions.map(s => (
-                  <tr key={s.feed_session_id}>
-                    <td>{new Date(s.started_at).toLocaleString('id-ID')}</td>
-                    <td><span className="badge badge-info">{s.session_name}</span></td>
-                    <td>{parseFloat(s.target_total_g).toFixed(0)}</td>
-                    <td>{s.actual_total_g ? parseFloat(s.actual_total_g).toFixed(0) : '-'}</td>
-                    <td>{s.actual_batch_count || s.planned_batch_count}</td>
-                    <td>{s.success ? <span className="badge badge-success">Sukses</span> :
-                                     (s.completed_at ? <span className="badge badge-danger">Gagal</span> :
-                                                       <span className="badge badge-warning">Berjalan</span>)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+              <ExportExcelButton
+                data={sessions}
+                filename={`sesi-pakan-${device.device_id}`}
+                sheetName="Sesi Pakan"
+                columns={[
+                  { header: 'Mulai', accessor: (s) => new Date(s.started_at).toLocaleString('id-ID') },
+                  { header: 'Sesi', accessor: 'session_name' },
+                  { header: 'Target (g)', accessor: (s) => parseFloat(s.target_total_g).toFixed(0) },
+                  { header: 'Aktual (g)', accessor: (s) => s.actual_total_g ? parseFloat(s.actual_total_g).toFixed(0) : '-' },
+                  { header: 'Batch', accessor: (s) => s.actual_batch_count || s.planned_batch_count },
+                  { header: 'Status', accessor: feedStatusText },
+                ]}
+              />
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Mulai</th><th>Sesi</th><th>Target (g)</th><th>Aktual (g)</th><th>Batch</th><th>Status</th></tr>
+                </thead>
+                <tbody>
+                  {sessionsPg.pageData.map(s => (
+                    <tr key={s.feed_session_id}>
+                      <td>{new Date(s.started_at).toLocaleString('id-ID')}</td>
+                      <td><span className="badge badge-info">{s.session_name}</span></td>
+                      <td>{parseFloat(s.target_total_g).toFixed(0)}</td>
+                      <td>{s.actual_total_g ? parseFloat(s.actual_total_g).toFixed(0) : '-'}</td>
+                      <td>{s.actual_batch_count || s.planned_batch_count}</td>
+                      <td>{s.success ? <span className="badge badge-success">Sukses</span> :
+                                       (s.completed_at ? <span className="badge badge-danger">Gagal</span> :
+                                                         <span className="badge badge-warning">Berjalan</span>)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <PaginationControls {...sessionsPg} />
+          </>
         ))}
 
         {activeTab === 'batch' && (sessionsBatched.length === 0 ? (
           <div className="empty-state"><p>Belum ada batch tercatat</p></div>
         ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr><th>Waktu</th><th>Sesi</th><th>Batch</th><th>Target (g)</th><th>Aktual (g)</th><th>Spinner</th><th>Status</th></tr>
-              </thead>
-              <tbody>
-                {sessionsBatched.slice(0, 100).map((b, i) => (
-                  <tr key={i}>
-                    <td>{b.recorded_at ? new Date(b.recorded_at).toLocaleTimeString('id-ID') : '-'}</td>
-                    <td className="text-xs">{b.session_name}</td>
-                    <td>{b.batch_no}/{b.total_batches}</td>
-                    <td>{parseFloat(b.target_g).toFixed(1)}</td>
-                    <td style={{ fontWeight: 700 }}>{parseFloat(b.actual_g).toFixed(1)}</td>
-                    <td><span className="badge badge-info">{b.spinner_direction}</span></td>
-                    <td>{b.success ? '✅' : '❌'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+              <ExportExcelButton
+                data={sessionsBatched}
+                filename={`batch-detail-${device.device_id}`}
+                sheetName="Batch Detail"
+                columns={[
+                  { header: 'Waktu', accessor: (b) => b.recorded_at ? new Date(b.recorded_at).toLocaleTimeString('id-ID') : '-' },
+                  { header: 'Sesi', accessor: 'session_name' },
+                  { header: 'Batch', accessor: (b) => `${b.batch_no}/${b.total_batches}` },
+                  { header: 'Target (g)', accessor: (b) => parseFloat(b.target_g).toFixed(1) },
+                  { header: 'Aktual (g)', accessor: (b) => parseFloat(b.actual_g).toFixed(1) },
+                  { header: 'Spinner', accessor: 'spinner_direction' },
+                  { header: 'Status', accessor: (b) => b.success ? 'Sukses' : 'Gagal' },
+                ]}
+              />
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Waktu</th><th>Sesi</th><th>Batch</th><th>Target (g)</th><th>Aktual (g)</th><th>Spinner</th><th>Status</th></tr>
+                </thead>
+                <tbody>
+                  {batchPg.pageData.map((b, i) => (
+                    <tr key={i}>
+                      <td>{b.recorded_at ? new Date(b.recorded_at).toLocaleTimeString('id-ID') : '-'}</td>
+                      <td className="text-xs">{b.session_name}</td>
+                      <td>{b.batch_no}/{b.total_batches}</td>
+                      <td>{parseFloat(b.target_g).toFixed(1)}</td>
+                      <td style={{ fontWeight: 700 }}>{parseFloat(b.actual_g).toFixed(1)}</td>
+                      <td><span className="badge badge-info">{b.spinner_direction}</span></td>
+                      <td>{b.success ? '✅' : '❌'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <PaginationControls {...batchPg} />
+          </>
         ))}
 
         {activeTab === 'sampling' && (summaries.length === 0 ? (
           <div className="empty-state"><p>Belum ada riwayat sampling</p></div>
         ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr><th>Waktu</th><th>Rata-rata Berat (g)</th><th>Jml Sample</th><th>Jml Ikan Kolam</th><th>Estimasi Biomassa (kg)</th><th>Pakan/Jadwal (g)</th></tr>
-              </thead>
-              <tbody>
-                {summaries.map(sm => (
-                  <tr key={sm.id}>
-                    <td>{new Date(sm.summarized_at).toLocaleString('id-ID')}</td>
-                    <td style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>{parseFloat(sm.average_fish_weight_g).toFixed(2)}</td>
-                    <td>{sm.sample_count}</td>
-                    <td>{sm.fish_count}</td>
-                    <td>{parseFloat(sm.estimated_biomass_kg).toFixed(2)}</td>
-                    <td>{Math.round(sm.estimated_feed_per_schedule_g)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+              <ExportExcelButton
+                data={summaries}
+                filename={`riwayat-sampling-${device.device_id}`}
+                sheetName="Riwayat Sampling"
+                columns={[
+                  { header: 'Waktu', accessor: (sm) => new Date(sm.summarized_at).toLocaleString('id-ID') },
+                  { header: 'Rata-rata Berat (g)', accessor: (sm) => parseFloat(sm.average_fish_weight_g).toFixed(2) },
+                  { header: 'Jml Sample', accessor: 'sample_count' },
+                  { header: 'Jml Ikan Kolam', accessor: 'fish_count' },
+                  { header: 'Estimasi Biomassa (kg)', accessor: (sm) => parseFloat(sm.estimated_biomass_kg).toFixed(2) },
+                  { header: 'Pakan/Jadwal (g)', accessor: (sm) => Math.round(sm.estimated_feed_per_schedule_g) },
+                ]}
+              />
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Waktu</th><th>Rata-rata Berat (g)</th><th>Jml Sample</th><th>Jml Ikan Kolam</th><th>Estimasi Biomassa (kg)</th><th>Pakan/Jadwal (g)</th></tr>
+                </thead>
+                <tbody>
+                  {samplingPg.pageData.map(sm => (
+                    <tr key={sm.id}>
+                      <td>{new Date(sm.summarized_at).toLocaleString('id-ID')}</td>
+                      <td style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>{parseFloat(sm.average_fish_weight_g).toFixed(2)}</td>
+                      <td>{sm.sample_count}</td>
+                      <td>{sm.fish_count}</td>
+                      <td>{parseFloat(sm.estimated_biomass_kg).toFixed(2)}</td>
+                      <td>{Math.round(sm.estimated_feed_per_schedule_g)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <PaginationControls {...samplingPg} />
+          </>
         ))}
 
         {activeTab === 'fish' && (samplesFlat.length === 0 ? (
           <div className="empty-state"><p>Belum ada data berat ikan tercatat</p></div>
         ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr><th>Waktu</th><th>Sesi</th><th>Ikan #</th><th>Berat Aktual (g)</th></tr>
-              </thead>
-              <tbody>
-                {samplesFlat.slice(0, 200).map((s, i) => (
-                  <tr key={s.id || i}>
-                    <td>{new Date(s.sampled_at).toLocaleString('id-ID')}</td>
-                    <td><span className="badge badge-info">{s.session_label}</span></td>
-                    <td>{s.fish_no}</td>
-                    <td style={{ fontWeight: 700 }}>{parseFloat(s.fish_weight_g).toFixed(2)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+              <ExportExcelButton
+                data={samplesFlat}
+                filename={`detail-per-ikan-${device.device_id}`}
+                sheetName="Detail per Ikan"
+                columns={[
+                  { header: 'Waktu', accessor: (s) => new Date(s.sampled_at).toLocaleString('id-ID') },
+                  { header: 'Sesi', accessor: 'session_label' },
+                  { header: 'Ikan #', accessor: 'fish_no' },
+                  { header: 'Berat Aktual (g)', accessor: (s) => parseFloat(s.fish_weight_g).toFixed(2) },
+                ]}
+              />
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Waktu</th><th>Sesi</th><th>Ikan #</th><th>Berat Aktual (g)</th></tr>
+                </thead>
+                <tbody>
+                  {fishPg.pageData.map((s, i) => (
+                    <tr key={s.id || i}>
+                      <td>{new Date(s.sampled_at).toLocaleString('id-ID')}</td>
+                      <td><span className="badge badge-info">{s.session_label}</span></td>
+                      <td>{s.fish_no}</td>
+                      <td style={{ fontWeight: 700 }}>{parseFloat(s.fish_weight_g).toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <PaginationControls {...fishPg} />
+          </>
         ))}
 
         {activeTab === 'errors' && (errors.length === 0 ? (
           <div className="empty-state"><p>🎉 Tidak ada error tercatat</p></div>
         ) : (
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>Waktu</th><th>Code</th><th>Pesan</th></tr></thead>
-              <tbody>
-                {errors.map(e => (
-                  <tr key={e.id}>
-                    <td>{new Date(e.occurred_at).toLocaleString('id-ID')}</td>
-                    <td><span className="badge badge-danger">{e.code}</span></td>
-                    <td>{e.message}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+              <ExportExcelButton
+                data={errors}
+                filename={`error-${device.device_id}`}
+                sheetName="Error"
+                columns={[
+                  { header: 'Waktu', accessor: (e) => new Date(e.occurred_at).toLocaleString('id-ID') },
+                  { header: 'Code', accessor: 'code' },
+                  { header: 'Pesan', accessor: 'message' },
+                ]}
+              />
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Waktu</th><th>Code</th><th>Pesan</th></tr></thead>
+                <tbody>
+                  {errorsPg.pageData.map(e => (
+                    <tr key={e.id}>
+                      <td>{new Date(e.occurred_at).toLocaleString('id-ID')}</td>
+                      <td><span className="badge badge-danger">{e.code}</span></td>
+                      <td>{e.message}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <PaginationControls {...errorsPg} />
+          </>
         ))}
       </div>
     </>
