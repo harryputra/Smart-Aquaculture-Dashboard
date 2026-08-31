@@ -5,6 +5,20 @@
 
 const { requireRole, requirePondAccess, requireDeviceAccess, orgFilter } = require('./authorize');
 
+// Firmware >= 3.9.0 = "offline-capable": jadwal (jam+gram presisi per sesi)
+// disimpan & dieksekusi mandiri di alat via RTC lokal -- gate-nya autoFeedEnabled
+// HARUS true. < 3.9 = "online-driven": server yang memicu tiap sesi (manual_feed_gram
+// via cron), onboard auto-feed HARUS false (cegah dobel pakan). Sama persis dgn
+// isOfflineCap() di backend/feed-plan.js -- diduplikasi di sini (bukan di-share)
+// karena cuma dipakai di 1 tempat masing-masing & tetap ringan untuk dijaga sinkron.
+function verGte(v, target) {
+  const pa = String(v || '0').split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = target.split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < 3; i++) { const a = pa[i] || 0, b = pb[i] || 0; if (a > b) return true; if (a < b) return false; }
+  return true;
+}
+const isOfflineCap = (v) => verGte(v, '3.9.0');
+
 function registerLeleHandlers({ app, pool, mqttClient }) {
   mqttClient.subscribe('lele/device/status');
   mqttClient.subscribe('lele/biomass/sample');
@@ -69,7 +83,7 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
     try {
       const payload = JSON.parse(_raw);
       const deviceId = payload.device_id || 'unknown';
-      const pondR = await pool.query(`SELECT pond_id, is_online, rtc_lost_power_at_boot FROM lele_devices WHERE device_id = $1`, [deviceId]);
+      const pondR = await pool.query(`SELECT pond_id, is_online, rtc_lost_power_at_boot, firmware_version FROM lele_devices WHERE device_id = $1`, [deviceId]);
       const pondId = pondR.rows[0]?.pond_id || null;
       const wasOffline = pondR.rows[0]?.is_online === false;   // untuk deteksi "kembali online"
       const rtcLostPowerWasAlready = pondR.rows[0]?.rtc_lost_power_at_boot === true;
@@ -84,13 +98,20 @@ function registerLeleHandlers({ app, pool, mqttClient }) {
              VALUES ($1,'success','offline','Perangkat Kembali Online',$2)`,
             [pondId, `Feeder ${payload.device_id} kembali terhubung (internet & listrik pulih).`]
           ).catch(() => {});
-          // Bila kolam punya Rencana Pakan AKTIF, MATIKAN auto-feed onboard begitu
-          // online — supaya jadwal onboard (AUTO FEED, porsi bawaan) tidak memberi
-          // pakan sendiri; porsi persen diatur server via Rencana Pakan. Gate onboard =
-          // autoFeedEnabled, jadi set_auto_feed (BUKAN set_feed_mode yg tak dikenali fw).
-          // (Menutup kasus: rencana disimpan saat feeder masih offline → belum ter-set.)
+          // Bila kolam punya Rencana Pakan AKTIF, pulihkan gate autoFeedEnabled yang
+          // benar begitu alat online kembali (menutup kasus: reconnect terjadi saat
+          // gate onboard sempat ke-reset/tidak sinkron). BUKAN selalu false -- itu
+          // hanya benar utk firmware < 3.9 (online-driven, server yg memicu tiap sesi
+          // via manual_feed_gram, onboard auto-feed harus OFF cegah dobel pakan).
+          // Utk firmware >= 3.9 (offline-capable) gate ini JUSTRU HARUS true --
+          // itulah yang menjalankan jadwal presisi (jam+gram per sesi) secara mandiri
+          // via RTC lokal. Mengirim false ke device kelas ini setiap reconnect diam-diam
+          // MEMATIKAN auto-feed onboard-nya -- sesi terjadwal berhenti jalan sama sekali
+          // sampai user menyimpan ulang Rencana Pakan, tanpa ada error/log yang terlihat.
           const fp = await pool.query(`SELECT 1 FROM feed_plan WHERE pond_id=$1 AND enabled=TRUE`, [pondId]).catch(() => ({ rows: [] }));
-          if (fp.rows.length) sendCommand(deviceId, 'set_auto_feed', { enabled: false });
+          if (fp.rows.length) {
+            sendCommand(deviceId, 'set_auto_feed', { enabled: isOfflineCap(pondR.rows[0]?.firmware_version) });
+          }
         }
 
         await pool.query(`
