@@ -75,7 +75,7 @@ String topicConfig;
 
 // ===================== OTA (update firmware jarak jauh) =====================
 // v3.9: HTTPS pull + verifikasi sha256 (mbedtls) + rollback dual-partition.
-const char* FIRMWARE_VERSION = "3.9.1";
+const char* FIRMWARE_VERSION = "3.9.2";
 // Host dashboard (lewat Cloudflare) untuk self-check manifest. URL unduh .bin
 // yang sesungguhnya datang dari manifest MQTT (backend), jadi ini hanya utk poll.
 const char* OTA_API_HOST = "aquaculture.trin-polman.id";   // ganti ke domain dashboard Anda
@@ -364,18 +364,29 @@ enum RemoteCmd {
   CMD_BTN_BACK,
   CMD_GOTO_SCREEN,
   CMD_OPEN_VALVE,
-  CMD_CLOSE_VALVE
+  CMD_CLOSE_VALVE,
+  CMD_TEST_SERVO,
+  CMD_TEST_SPINNER,
+  CMD_TEST_AUGER
 };
 
 struct PendingCommand {
   RemoteCmd cmd;
   float     floatArg;
   int       intArg;
-  String    stringArg;
+  int       intArg2;   // uji spinner: PWM (120-255)
+  int       intArg3;   // uji spinner: arah (1=CW/kanan, 2=CCW/kiri)
+  String    stringArg; // uji servo: "open"/"close"/"sweep"; uji auger: "maju"/"mundur"
   unsigned long timestamp;
 };
 
-PendingCommand pendingCmd        = { CMD_NONE, 0, 0, "", 0 };
+PendingCommand pendingCmd        = { CMD_NONE, 0, 0, 0, 0, "", 0 };
+
+// Diset true oleh command "stop_all" (STOP DARURAT) supaya loop test aktuator
+// yang sedang berjalan (servo/spinner/auger) ikut berhenti seketika, tidak
+// menunggu durasinya habis. Aktuator sendiri sudah dimatikan LANGSUNG oleh
+// stopAllActuators() saat command diterima -- flag ini hanya menghentikan loop-nya.
+volatile bool testStopRequested = false;
 bool virtualBtnPressed[4]        = { false, false, false, false };
 
 // =====================================================
@@ -404,15 +415,19 @@ enum ScreenState {
   SCREEN_WIFI_STATUS,
   SCREEN_RTC_STATUS,
   SCREEN_DEVICE_INFO,
-  SCREEN_ACTUATOR_STATUS
+  SCREEN_ACTUATOR_STATUS,
+  SCREEN_TEST_MENU
 };
 
 ScreenState currentScreen = SCREEN_MAIN_MENU;
 
-const int MAIN_MENU_COUNT = 8;
+// "Test Aktuator" ditambahkan di AKHIR daftar (index 8) supaya index 0-7 yang
+// sudah ada tidak ikut bergeser (menghindari perlu mengubah semua `case N:` di
+// handleMainMenu() yang sudah lama & teruji).
+const int MAIN_MENU_COUNT = 9;
 String mainMenu[MAIN_MENU_COUNT] = {
   "Status Sistem", "Pakan Otomatis", "Timbang Biomassa", "Data Kolam",
-  "Jadwal Pakan", "Kalibrasi/Tare", "Riwayat Akhir", "Pengaturan"
+  "Jadwal Pakan", "Kalibrasi/Tare", "Riwayat Akhir", "Pengaturan", "Test Aktuator"
 };
 
 const int FEED_MENU_COUNT = 3;
@@ -425,6 +440,9 @@ String biomassMenu[BIOMASS_MENU_COUNT] = {
 
 const int DATA_KOLAM_MENU_COUNT = 3;
 String dataKolamMenu[DATA_KOLAM_MENU_COUNT] = { "Jumlah Ikan", "Frekuensi/Hari", "Feed Info" };
+
+const int TEST_MENU_COUNT = 3;
+String testMenu[TEST_MENU_COUNT] = { "Test Servo", "Test Spinner", "Test Auger" };
 
 const int TARE_MENU_COUNT = 3;
 String tareMenu[TARE_MENU_COUNT] = { "Tare Pakan", "Tare Biomassa", "Tare Semua" };
@@ -443,6 +461,7 @@ int scheduleMenuIndex   = 0;
 int tareMenuIndex       = 0;
 int historyMenuIndex    = 0;
 int settingsMenuIndex   = 0;
+int testMenuIndex       = 0;
 int statusPage          = 0;
 int dataFeedInfoPage    = 0;
 int actuatorStatusPage  = 0;
@@ -492,6 +511,10 @@ String timestampString();
 bool runFeedingSession(float totalFeedGram, String sessionName);
 void onMqttMessage(const String& topic, const String& payload, const size_t size);
 void processPendingCommand();
+bool testAbortRequested();
+void testServoAction(const char* action);
+void testSpinnerAction(int seconds, uint8_t pwm, int dir);
+void testAugerAction(int seconds, const char* dir);
 void publishAck(String cmdName, bool success, String reason);
 void publishDeviceStatus(bool force);
 void publishBiomassSample(int fishNo, float weightGram);
@@ -610,6 +633,7 @@ String screenName() {
     case SCREEN_RTC_STATUS:          return "rtc_status";
     case SCREEN_DEVICE_INFO:         return "device_info";
     case SCREEN_ACTUATOR_STATUS:     return "actuator_status";
+    case SCREEN_TEST_MENU:           return "test_menu";
     default:                         return "unknown";
   }
 }
@@ -970,6 +994,45 @@ void onMqttMessage(const String& topic, const String& payload, const size_t size
     else if (strcmp(command, "auto_gen_schedule")== 0) { pendingCmd.cmd = CMD_AUTO_GEN_SCHEDULE; publishAck(command, true, "Schedule auto-gen queued"); }
     else if (strcmp(command, "open_valve")       == 0) { pendingCmd.cmd = CMD_OPEN_VALVE;       publishAck(command, true, "Servo open"); }
     else if (strcmp(command, "close_valve")      == 0) { pendingCmd.cmd = CMD_CLOSE_VALVE;      publishAck(command, true, "Servo close"); }
+    // ---- UJI HARDWARE (commissioning, dipanggil dari halaman "Uji Hardware" dashboard) ----
+    else if (strcmp(command, "ping") == 0) {
+      publishAck(command, true, "pong");
+    }
+    else if (strcmp(command, "test_servo") == 0) {
+      if (feedingInProgress) { publishAck(command, false, "Sedang feeding, uji servo ditolak"); return; }
+      const char* action = doc["action"] | "sweep";
+      if (strcmp(action, "open") != 0 && strcmp(action, "close") != 0) action = "sweep";
+      pendingCmd.cmd = CMD_TEST_SERVO;
+      pendingCmd.stringArg = action;
+      publishAck(command, true, String("Uji servo: ") + action);
+    }
+    else if (strcmp(command, "test_spread") == 0) {
+      if (feedingInProgress) { publishAck(command, false, "Sedang feeding, uji spinner ditolak"); return; }
+      int seconds = doc["seconds"] | 5;
+      int pwm     = doc["pwm"]     | 200;
+      int dir     = doc["dir"]     | 1;
+      pendingCmd.cmd      = CMD_TEST_SPINNER;
+      pendingCmd.intArg   = constrain(seconds, 1, 15);
+      pendingCmd.intArg2  = constrain(pwm, 120, 255);
+      pendingCmd.intArg3  = (dir == 2) ? 2 : 1;
+      publishAck(command, true, "Uji spinner queued");
+    }
+    else if (strcmp(command, "test_auger") == 0) {
+      if (feedingInProgress) { publishAck(command, false, "Sedang feeding, uji auger ditolak"); return; }
+      int seconds = doc["seconds"] | 3;
+      const char* dir = doc["dir"] | "maju";
+      pendingCmd.cmd       = CMD_TEST_AUGER;
+      pendingCmd.intArg    = constrain(seconds, 1, 8);
+      pendingCmd.stringArg = (strcmp(dir, "mundur") == 0) ? "mundur" : "maju";
+      publishAck(command, true, "Uji auger queued");
+    }
+    else if (strcmp(command, "stop_all") == 0) {
+      // STOP DARURAT: jalankan LANGSUNG (tidak lewat antrian pendingCmd) supaya
+      // instan, dan hentikan loop test yang mungkin sedang berjalan.
+      stopAllActuators();
+      testStopRequested = true;
+      publishAck(command, true, "Semua aktuator dihentikan");
+    }
     else if (strcmp(command, "btn") == 0) {
       const char* btn = doc["button"] | "";
       if      (strcmp(btn, "up")   == 0) virtualBtnPressed[B_UP]   = true;
@@ -1086,6 +1149,15 @@ void processPendingCommand() {
     case CMD_CLOSE_VALVE:
       servoClose();
       lcd.clear(); lcdLine(0,"WEB: VALVE"); lcdLine(1,"CLOSE"); delay(1000); lcd.clear();
+      break;
+    case CMD_TEST_SERVO:
+      testServoAction(pendingCmd.stringArg.c_str());
+      break;
+    case CMD_TEST_SPINNER:
+      testSpinnerAction(pendingCmd.intArg, (uint8_t)pendingCmd.intArg2, pendingCmd.intArg3);
+      break;
+    case CMD_TEST_AUGER:
+      testAugerAction(pendingCmd.intArg, pendingCmd.stringArg.c_str());
       break;
     default: break;
   }
@@ -1737,6 +1809,64 @@ void stopAllActuators() {
 }
 
 // =====================================================
+// UJI HARDWARE (commissioning) -- dipanggil dari processPendingCommand()
+// (MQTT, dipicu dashboard) DAN dari handleTestMenu() (LCD) supaya perilaku
+// selalu sama persis dari kedua jalur, tidak ada logika ganda yang bisa beda.
+// =====================================================
+bool testAbortRequested() { return backPressed() || testStopRequested; }
+
+void testServoAction(const char* action) {
+  lcd.clear(); lcdLine(0, "TEST SERVO"); lcdLine(1, action);
+  unsigned long start;
+  if (strcmp(action, "open") == 0) {
+    servoOpen();
+    start = millis();
+    while (millis() - start < 1500 && !testAbortRequested()) { maintainNetwork(); delay(20); }
+  } else if (strcmp(action, "close") == 0) {
+    servoClose();
+    start = millis();
+    while (millis() - start < 1500 && !testAbortRequested()) { maintainNetwork(); delay(20); }
+  } else {   // sweep: buka-tutup bertahap 2x
+    for (int i = 0; i < 2 && !testAbortRequested(); i++) {
+      servoOpen();
+      start = millis();
+      while (millis() - start < 900 && !testAbortRequested()) { maintainNetwork(); delay(20); }
+      servoClose();
+      start = millis();
+      while (millis() - start < 900 && !testAbortRequested()) { maintainNetwork(); delay(20); }
+    }
+  }
+  testStopRequested = false;
+  lcd.clear(); lcdLine(0, "TEST SERVO"); lcdLine(1, "Selesai"); delay(800); lcd.clear();
+}
+
+void testSpinnerAction(int seconds, uint8_t pwm, int dir) {
+  lcd.clear(); lcdLine(0, "TEST SPINNER"); lcdLine(1, (dir == 2 ? "CCW P:" : "CW P:") + String(pwm));
+  if (dir == 2) spinnerCCWPWM(pwm); else spinnerCWPWM(pwm);
+  unsigned long start = millis();
+  while ((millis() - start) < (unsigned long)seconds * 1000UL && !testAbortRequested()) {
+    maintainNetwork(); delay(20);
+  }
+  spinnerStop();
+  testStopRequested = false;
+  lcd.clear(); lcdLine(0, "TEST SPINNER"); lcdLine(1, "Selesai"); delay(800); lcd.clear();
+}
+
+void testAugerAction(int seconds, const char* dir) {
+  lcd.clear(); lcdLine(0, "TEST AUGER"); lcdLine(1, dir);
+  stepperEnable();
+  int dirLevel = (strcmp(dir, "mundur") == 0) ? STEPPER_DIR_CCW : STEPPER_DIR_CW;
+  unsigned long start = millis();
+  while ((millis() - start) < (unsigned long)seconds * 1000UL && !testAbortRequested()) {
+    maintainNetwork();
+    stepperRunBlock(dirLevel, 10, AUGER_FAST_DELAY_US);
+  }
+  stepperDisable();
+  testStopRequested = false;
+  lcd.clear(); lcdLine(0, "TEST AUGER"); lcdLine(1, "Selesai"); delay(800); lcd.clear();
+}
+
+// =====================================================
 // TARE
 // =====================================================
 void tareChamber() {
@@ -2068,6 +2198,7 @@ void showTareMenu()     { lcdLine(0,"KALIBRASI/TARE"); lcdLine(1,">" + tareMenu[
 void showHistoryMenu()  { lcdLine(0,"RIWAYAT AKHIR"); lcdLine(1,">" + historyMenu[historyMenuIndex]); }
 void showSettingsMenu() { lcdLine(0,"PENGATURAN"); lcdLine(1,">" + settingsMenu[settingsMenuIndex]); }
 void showDataKolamMenu(){ lcdLine(0,"DATA KOLAM"); lcdLine(1,">" + dataKolamMenu[dataKolamMenuIndex]); }
+void showTestMenu()     { lcdLine(0,"TEST AKTUATOR"); lcdLine(1,">" + testMenu[testMenuIndex]); }
 
 void showStatus() {
   if (statusPage == 0) {
@@ -2298,6 +2429,7 @@ void handleMainMenu() {
       case 5: currentScreen = SCREEN_TARE_MENU;      break;
       case 6: currentScreen = SCREEN_HISTORY_MENU;   break;
       case 7: currentScreen = SCREEN_SETTINGS_MENU;  break;
+      case 8: currentScreen = SCREEN_TEST_MENU;      break;
     }
     publishDeviceStatus(true);
   }
@@ -2528,6 +2660,23 @@ void handleTareMenu() {
     lcd.clear();
   }
   showTareMenu();
+}
+
+void handleTestMenu() {
+  if (prevPressed()) { testMenuIndex = (testMenuIndex - 1 + TEST_MENU_COUNT) % TEST_MENU_COUNT; lcd.clear(); }
+  if (nextPressed()) { testMenuIndex = (testMenuIndex + 1) % TEST_MENU_COUNT; lcd.clear(); }
+  if (backPressed()) { currentScreen = SCREEN_MAIN_MENU; lcd.clear(); publishDeviceStatus(true); return; }
+  if (okPressed()) {
+    if (feedingInProgress) {
+      lcd.clear(); lcdLine(0,"Sedang feeding"); lcdLine(1,"Tunggu selesai"); delay(1200);
+    } else {
+      if      (testMenuIndex == 0) testServoAction("sweep");
+      else if (testMenuIndex == 1) testSpinnerAction(3, 200, 1);
+      else if (testMenuIndex == 2) testAugerAction(3, "maju");
+    }
+    lcd.clear();
+  }
+  showTestMenu();
 }
 
 void showHistorySelected() {
@@ -2860,6 +3009,7 @@ void loop() {
     case SCREEN_WIFI_STATUS:          handleWiFiStatus();         break;
     case SCREEN_RTC_STATUS:           handleRtcStatus();          break;
     case SCREEN_DEVICE_INFO:          handleDeviceInfo();         break;
+    case SCREEN_TEST_MENU:            handleTestMenu();           break;
     default:                                                       break;
   }
 
