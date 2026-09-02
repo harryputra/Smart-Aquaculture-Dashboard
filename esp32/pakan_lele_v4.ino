@@ -75,10 +75,10 @@ String topicConfig;
 
 // ===================== OTA (update firmware jarak jauh) =====================
 // v3.9: HTTPS pull + verifikasi sha256 (mbedtls) + rollback dual-partition.
-const char* FIRMWARE_VERSION = "3.9.4";
+const char* FIRMWARE_VERSION = "3.9.0";
 // Host dashboard (lewat Cloudflare) untuk self-check manifest. URL unduh .bin
 // yang sesungguhnya datang dari manifest MQTT (backend), jadi ini hanya utk poll.
-const char* OTA_API_HOST = "sipakale.um-km.id";   // ganti ke domain dashboard Anda
+const char* OTA_API_HOST = "aquaculture.trin-polman.id";   // ganti ke domain dashboard Anda
 #define OTA_TLS_INSECURE 1                                  // integritas dijamin sha256 manifest (TLS+auth)
 const char* OTA_ROOT_CA = "";                               // isi PEM bila OTA_TLS_INSECURE 0
 #define OTA_SELFCHECK_ENABLE 1                               // cek manifest server saat boot + berkala
@@ -104,11 +104,6 @@ Preferences prefs;
 
 bool rtcReady         = false;
 bool ntpSynced        = false;     // true jika RTC sudah pernah disinkron via NTP
-bool rtcLostPowerAtBoot = false;   // true jika rtc.lostPower() saat boot ini (mis. baterai
-                                    // cadangan DS3231 lemah/habis stlh mati listrik) — jam
-                                    // sempat fallback ke waktu kompilasi sampai NTP resync.
-                                    // rtc_ok saja TIDAK cukup menandai ini (cuma cek chip
-                                    // merespons, bukan cek waktunya akurat).
 unsigned long lastNtpSyncMs = 0;   // millis() saat NTP sync terakhir berhasil
 bool autoFeedEnabled  = true;
 bool feedingInProgress = false;
@@ -282,28 +277,18 @@ const int MAX_BATCH_COUNT = 80;
 float batchTargets[MAX_BATCH_COUNT];
 int   batchTargetCount = 0;
 
-const float FEED_SLOW_ZONE_G    = 4.0;
+const float FEED_SLOW_ZONE_G    = 10.0;
 const float FEED_STOP_MARGIN_G  = 1.5;
 
-// Jumlah LANGKAH motor (bukan gram) di awal FILL yang sengaja dijalankan pelan,
-// setara kira2 2-3 putaran fisik auger -- supaya tidak ada hentakan/lonjakan
-// pakan di awal. Perlu dikalibrasi langsung di alat: naikkan/turunkan sampai
-// benar2 terasa ~2-3 putaran auger sebelum berpindah ke kecepatan penuh.
-const int FILL_SLOWSTART_STEPS = 40;
-
 const float FEED_FINE_TOLERANCE_G      = 0.2;
-// Dinaikkan dari 7 -> 10 (naikkan lagi/turunkan sambil diuji langsung di alat
-// kalau ternyata sering overshoot lewat target atau kurang presisi) supaya
-// jumlah siklus nyicil yang dibutuhkan lebih sedikit -- tiap siklus tetap
-// perlu waktu settle yang sama, jadi makin sedikit siklus = makin cepat total.
-const int   FEED_FINE_TRICKLE_STEPS   = 10;
+const int   FEED_FINE_TRICKLE_STEPS   = 7;
 const unsigned long FEED_FINE_SETTLE_MS    = 400;
 const unsigned long FEED_FINE_TIMEOUT_MS   = 120000;
 const unsigned long EMPTY_RESIDUE_WAIT_MS  = 3000;
 
 const unsigned long FEED_FILL_TIMEOUT_MS = 120000;
 const unsigned long FEED_SETTLING_MS     = 800;
-const unsigned long SPINNER_PRESTART_MS  = 2500;
+const unsigned long SPINNER_PRESTART_MS  = 800;
 const unsigned long SPINNER_POSTCLOSE_MS = 500;
 const unsigned long DISPENSE_TIMEOUT_MS  = 60000;
 
@@ -374,29 +359,18 @@ enum RemoteCmd {
   CMD_BTN_BACK,
   CMD_GOTO_SCREEN,
   CMD_OPEN_VALVE,
-  CMD_CLOSE_VALVE,
-  CMD_TEST_SERVO,
-  CMD_TEST_SPINNER,
-  CMD_TEST_AUGER
+  CMD_CLOSE_VALVE
 };
 
 struct PendingCommand {
   RemoteCmd cmd;
   float     floatArg;
   int       intArg;
-  int       intArg2;   // uji spinner: PWM (120-255)
-  int       intArg3;   // uji spinner: arah (1=CW/kanan, 2=CCW/kiri)
-  String    stringArg; // uji servo: "open"/"close"/"sweep"; uji auger: "maju"/"mundur"
+  String    stringArg;
   unsigned long timestamp;
 };
 
-PendingCommand pendingCmd        = { CMD_NONE, 0, 0, 0, 0, "", 0 };
-
-// Diset true oleh command "stop_all" (STOP DARURAT) supaya loop test aktuator
-// yang sedang berjalan (servo/spinner/auger) ikut berhenti seketika, tidak
-// menunggu durasinya habis. Aktuator sendiri sudah dimatikan LANGSUNG oleh
-// stopAllActuators() saat command diterima -- flag ini hanya menghentikan loop-nya.
-volatile bool testStopRequested = false;
+PendingCommand pendingCmd        = { CMD_NONE, 0, 0, "", 0 };
 bool virtualBtnPressed[4]        = { false, false, false, false };
 
 // =====================================================
@@ -425,19 +399,15 @@ enum ScreenState {
   SCREEN_WIFI_STATUS,
   SCREEN_RTC_STATUS,
   SCREEN_DEVICE_INFO,
-  SCREEN_ACTUATOR_STATUS,
-  SCREEN_TEST_MENU
+  SCREEN_ACTUATOR_STATUS
 };
 
 ScreenState currentScreen = SCREEN_MAIN_MENU;
 
-// "Test Aktuator" ditambahkan di AKHIR daftar (index 8) supaya index 0-7 yang
-// sudah ada tidak ikut bergeser (menghindari perlu mengubah semua `case N:` di
-// handleMainMenu() yang sudah lama & teruji).
-const int MAIN_MENU_COUNT = 9;
+const int MAIN_MENU_COUNT = 8;
 String mainMenu[MAIN_MENU_COUNT] = {
   "Status Sistem", "Pakan Otomatis", "Timbang Biomassa", "Data Kolam",
-  "Jadwal Pakan", "Kalibrasi/Tare", "Riwayat Akhir", "Pengaturan", "Test Aktuator"
+  "Jadwal Pakan", "Kalibrasi/Tare", "Riwayat Akhir", "Pengaturan"
 };
 
 const int FEED_MENU_COUNT = 3;
@@ -450,9 +420,6 @@ String biomassMenu[BIOMASS_MENU_COUNT] = {
 
 const int DATA_KOLAM_MENU_COUNT = 3;
 String dataKolamMenu[DATA_KOLAM_MENU_COUNT] = { "Jumlah Ikan", "Frekuensi/Hari", "Feed Info" };
-
-const int TEST_MENU_COUNT = 3;
-String testMenu[TEST_MENU_COUNT] = { "Test Servo", "Test Spinner", "Test Auger" };
 
 const int TARE_MENU_COUNT = 3;
 String tareMenu[TARE_MENU_COUNT] = { "Tare Pakan", "Tare Biomassa", "Tare Semua" };
@@ -471,7 +438,6 @@ int scheduleMenuIndex   = 0;
 int tareMenuIndex       = 0;
 int historyMenuIndex    = 0;
 int settingsMenuIndex   = 0;
-int testMenuIndex       = 0;
 int statusPage          = 0;
 int dataFeedInfoPage    = 0;
 int actuatorStatusPage  = 0;
@@ -521,10 +487,6 @@ String timestampString();
 bool runFeedingSession(float totalFeedGram, String sessionName);
 void onMqttMessage(const String& topic, const String& payload, const size_t size);
 void processPendingCommand();
-bool testAbortRequested();
-void testServoAction(const char* action);
-void testSpinnerAction(int seconds, uint8_t pwm, int dir);
-void testAugerAction(int seconds, const char* dir);
 void publishAck(String cmdName, bool success, String reason);
 void publishDeviceStatus(bool force);
 void publishBiomassSample(int fishNo, float weightGram);
@@ -533,9 +495,6 @@ void publishFeedSessionStart(String sid, String sname, float total, int batches)
 void publishFeedBatch(String sid, int bn, int tb, float tg, float ag, bool ok);
 void publishFeedSummary(String sid, String sname, float total, float actual, int batches, bool ok);
 void publishError(String code, String msg);
-void servoOpenGradual();
-bool publishOrQueue(const char* topic, String payload);
-void flushPendingPublishes();
 void autoGenerateSchedulesFromFeedingPerDay();
 void tareChamber();
 void tareSampling();
@@ -646,7 +605,6 @@ String screenName() {
     case SCREEN_RTC_STATUS:          return "rtc_status";
     case SCREEN_DEVICE_INFO:         return "device_info";
     case SCREEN_ACTUATOR_STATUS:     return "actuator_status";
-    case SCREEN_TEST_MENU:           return "test_menu";
     default:                         return "unknown";
   }
 }
@@ -1007,45 +965,6 @@ void onMqttMessage(const String& topic, const String& payload, const size_t size
     else if (strcmp(command, "auto_gen_schedule")== 0) { pendingCmd.cmd = CMD_AUTO_GEN_SCHEDULE; publishAck(command, true, "Schedule auto-gen queued"); }
     else if (strcmp(command, "open_valve")       == 0) { pendingCmd.cmd = CMD_OPEN_VALVE;       publishAck(command, true, "Servo open"); }
     else if (strcmp(command, "close_valve")      == 0) { pendingCmd.cmd = CMD_CLOSE_VALVE;      publishAck(command, true, "Servo close"); }
-    // ---- UJI HARDWARE (commissioning, dipanggil dari halaman "Uji Hardware" dashboard) ----
-    else if (strcmp(command, "ping") == 0) {
-      publishAck(command, true, "pong");
-    }
-    else if (strcmp(command, "test_servo") == 0) {
-      if (feedingInProgress) { publishAck(command, false, "Sedang feeding, uji servo ditolak"); return; }
-      const char* action = doc["action"] | "sweep";
-      if (strcmp(action, "open") != 0 && strcmp(action, "close") != 0) action = "sweep";
-      pendingCmd.cmd = CMD_TEST_SERVO;
-      pendingCmd.stringArg = action;
-      publishAck(command, true, String("Uji servo: ") + action);
-    }
-    else if (strcmp(command, "test_spread") == 0) {
-      if (feedingInProgress) { publishAck(command, false, "Sedang feeding, uji spinner ditolak"); return; }
-      int seconds = doc["seconds"] | 5;
-      int pwm     = doc["pwm"]     | 200;
-      int dir     = doc["dir"]     | 1;
-      pendingCmd.cmd      = CMD_TEST_SPINNER;
-      pendingCmd.intArg   = constrain(seconds, 1, 15);
-      pendingCmd.intArg2  = constrain(pwm, 120, 255);
-      pendingCmd.intArg3  = (dir == 2) ? 2 : 1;
-      publishAck(command, true, "Uji spinner queued");
-    }
-    else if (strcmp(command, "test_auger") == 0) {
-      if (feedingInProgress) { publishAck(command, false, "Sedang feeding, uji auger ditolak"); return; }
-      int seconds = doc["seconds"] | 3;
-      const char* dir = doc["dir"] | "maju";
-      pendingCmd.cmd       = CMD_TEST_AUGER;
-      pendingCmd.intArg    = constrain(seconds, 1, 8);
-      pendingCmd.stringArg = (strcmp(dir, "mundur") == 0) ? "mundur" : "maju";
-      publishAck(command, true, "Uji auger queued");
-    }
-    else if (strcmp(command, "stop_all") == 0) {
-      // STOP DARURAT: jalankan LANGSUNG (tidak lewat antrian pendingCmd) supaya
-      // instan, dan hentikan loop test yang mungkin sedang berjalan.
-      stopAllActuators();
-      testStopRequested = true;
-      publishAck(command, true, "Semua aktuator dihentikan");
-    }
     else if (strcmp(command, "btn") == 0) {
       const char* btn = doc["button"] | "";
       if      (strcmp(btn, "up")   == 0) virtualBtnPressed[B_UP]   = true;
@@ -1163,15 +1082,6 @@ void processPendingCommand() {
       servoClose();
       lcd.clear(); lcdLine(0,"WEB: VALVE"); lcdLine(1,"CLOSE"); delay(1000); lcd.clear();
       break;
-    case CMD_TEST_SERVO:
-      testServoAction(pendingCmd.stringArg.c_str());
-      break;
-    case CMD_TEST_SPINNER:
-      testSpinnerAction(pendingCmd.intArg, (uint8_t)pendingCmd.intArg2, pendingCmd.intArg3);
-      break;
-    case CMD_TEST_AUGER:
-      testAugerAction(pendingCmd.intArg, pendingCmd.stringArg.c_str());
-      break;
     default: break;
   }
 }
@@ -1208,8 +1118,6 @@ void publishDeviceStatus(bool forcePublish) {
   payload += "\"wifi_connected\":"        + String(WiFi.status()==WL_CONNECTED?"true":"false") + ",";
   payload += "\"mqtt_connected\":"        + String(mqttReady() ? "true" : "false")        + ",";
   payload += "\"rtc_ok\":"               + String(rtcReady ? "true" : "false")            + ",";
-  payload += "\"rtc_lost_power_at_boot\":" + String(rtcLostPowerAtBoot ? "true" : "false") + ",";
-  payload += "\"ntp_synced\":"           + String(ntpSynced ? "true" : "false")           + ",";
   payload += "\"auto_feed_enabled\":"    + String(autoFeedEnabled ? "true" : "false")     + ",";
   payload += "\"feeding_in_progress\":"  + String(feedingInProgress ? "true" : "false")   + ",";
   payload += "\"screen\":\""             + screenName()                                   + "\",";
@@ -1285,53 +1193,8 @@ void publishBiomassSummary() {
   mqttPublish(TOPIC_BIOMASS_SUMMARY, p);
 }
 
-// =====================================================
-// ANTRIAN KIRIM-ULANG OFFLINE (event pakan: session/batch/summary)
-// =====================================================
-// Disimpan di RAM (bukan flash/NVS) -- masalah konektivitas yang teramati di
-// alat ini adalah WiFi/MQTT putus SEMENTARA (detik s/d menit) sementara alat
-// tetap menyala, bukan mati listrik/reboot. Flash/NVS punya batas siklus
-// tulis terbatas; menulis tiap event pakan ke situ (~6-7x per sesi, berkali2
-// sehari) akan mempercepat aus tanpa manfaat nyata untuk skenario yang
-// sebenarnya terjadi. Kalau nanti terbukti alat juga sering benar2 reboot
-// saat ada event pakan yg belum terkirim, baru masuk akal ditambah lapisan
-// flash terpisah -- itu kasus beda dari yang sudah teramati.
-const int PENDING_PUBLISH_MAX = 20;
-struct PendingPublish { String topic; String payload; };
-PendingPublish pendingPublishQueue[PENDING_PUBLISH_MAX];
-int pendingPublishCount = 0;
-
-// Coba kirim langsung; kalau gagal (MQTT belum siap/putus), simpan ke antrian
-// utk dicoba lagi otomatis oleh flushPendingPublishes() begitu tersambung lagi.
-bool publishOrQueue(const char* topic, String payload) {
-  if (mqttPublish(topic, payload)) return true;
-  if (pendingPublishCount >= PENDING_PUBLISH_MAX) {
-    // Antrian penuh -- buang yang PALING LAMA supaya event TERBARU tetap
-    // kebagian slot (lebih berguna drpd event lama yg makin tidak relevan).
-    for (int i = 1; i < PENDING_PUBLISH_MAX; i++) pendingPublishQueue[i - 1] = pendingPublishQueue[i];
-    pendingPublishCount--;
-  }
-  pendingPublishQueue[pendingPublishCount].topic   = topic;
-  pendingPublishQueue[pendingPublishCount].payload = payload;
-  pendingPublishCount++;
-  return false;
-}
-
-// Dipanggil tiap loop() -- kirim ulang isi antrian begitu MQTT tersambung
-// lagi. Dibatasi maks 3 kali kirim per panggilan supaya tidak membanjiri
-// koneksi yang baru saja pulih sekaligus dalam satu waktu.
-void flushPendingPublishes() {
-  if (pendingPublishCount == 0 || !mqttReady()) return;
-  int sent = 0;
-  while (pendingPublishCount > 0 && sent < 3) {
-    if (!mqttClient.publish(pendingPublishQueue[0].topic.c_str(), pendingPublishQueue[0].payload)) break;
-    for (int i = 1; i < pendingPublishCount; i++) pendingPublishQueue[i - 1] = pendingPublishQueue[i];
-    pendingPublishCount--;
-    sent++;
-  }
-}
-
 void publishFeedSessionStart(String sid, String sname, float total, int batches) {
+  if (!mqttReady()) return;
   String p = "{";
   p += "\"device_id\":\""       + String(DEVICE_ID)    + "\",";
   p += "\"timestamp\":\""       + timestampString()     + "\",";
@@ -1342,10 +1205,11 @@ void publishFeedSessionStart(String sid, String sname, float total, int batches)
   p += "\"planned_batch_count\":" + String(batches)     + ",";
   p += "\"max_batch_g\":"       + String(MAX_BATCH_GRAM, 2);
   p += "}";
-  publishOrQueue(TOPIC_FEED_SESSION, p);
+  mqttPublish(TOPIC_FEED_SESSION, p);
 }
 
 void publishFeedBatch(String sid, int bn, int tb, float tg, float ag, bool ok) {
+  if (!mqttReady()) return;
   String dir = ((bn - 1) % 2 == 0) ? "CW" : "CCW";
   String p = "{";
   p += "\"device_id\":\""       + String(DEVICE_ID) + "\",";
@@ -1358,10 +1222,11 @@ void publishFeedBatch(String sid, int bn, int tb, float tg, float ag, bool ok) {
   p += "\"spinner_direction\":\"" + dir              + "\",";
   p += "\"success\":"           + String(ok ? "true" : "false");
   p += "}";
-  publishOrQueue(TOPIC_FEED_BATCH, p);
+  mqttPublish(TOPIC_FEED_BATCH, p);
 }
 
 void publishFeedSummary(String sid, String sname, float total, float actual, int batches, bool ok) {
+  if (!mqttReady()) return;
   String p = "{";
   p += "\"device_id\":\""       + String(DEVICE_ID)    + "\",";
   p += "\"timestamp\":\""       + timestampString()     + "\",";
@@ -1373,7 +1238,7 @@ void publishFeedSummary(String sid, String sname, float total, float actual, int
   p += "\"batch_count\":"       + String(batches)       + ",";
   p += "\"success\":"           + String(ok ? "true" : "false");
   p += "}";
-  publishOrQueue(TOPIC_FEED_SUMMARY, p);
+  mqttPublish(TOPIC_FEED_SUMMARY, p);
 }
 
 // =====================================================
@@ -1730,23 +1595,6 @@ void servoInitClose() {
 void servoOpen()  { doorServo.write(SERVO_OPEN_ANGLE);  servoCommandAngle = SERVO_OPEN_ANGLE;  }
 void servoClose() { doorServo.write(SERVO_CLOSE_ANGLE); servoCommandAngle = SERVO_CLOSE_ANGLE; }
 
-// Buka pintu BERTAHAP (bukan langsung lompat ke sudut penuh) -- supaya pakan
-// yang tertampung di atas mengalir pelan-pelan ke spinner, bukan tumpah
-// sekaligus menimpa sisa pakan yang mungkin masih nyangkut di piringan
-// spinner dari batch sebelumnya.
-void servoOpenGradual() {
-  int fromAngle = SERVO_CLOSE_ANGLE;
-  int toAngle   = SERVO_OPEN_ANGLE;
-  int steps     = 4;
-  for (int i = 1; i <= steps; i++) {
-    int angle = fromAngle + (int)((long)(toAngle - fromAngle) * i / steps);
-    doorServo.write(angle);
-    servoCommandAngle = angle;
-    maintainNetwork();
-    delay(150);
-  }
-}
-
 // =====================================================
 // ANTI-CLOG CYCLE: tutup sesaat lalu buka lagi
 // =====================================================
@@ -1882,64 +1730,6 @@ void stopAllActuators() {
 }
 
 // =====================================================
-// UJI HARDWARE (commissioning) -- dipanggil dari processPendingCommand()
-// (MQTT, dipicu dashboard) DAN dari handleTestMenu() (LCD) supaya perilaku
-// selalu sama persis dari kedua jalur, tidak ada logika ganda yang bisa beda.
-// =====================================================
-bool testAbortRequested() { return backPressed() || testStopRequested; }
-
-void testServoAction(const char* action) {
-  lcd.clear(); lcdLine(0, "TEST SERVO"); lcdLine(1, action);
-  unsigned long start;
-  if (strcmp(action, "open") == 0) {
-    servoOpen();
-    start = millis();
-    while (millis() - start < 1500 && !testAbortRequested()) { maintainNetwork(); delay(20); }
-  } else if (strcmp(action, "close") == 0) {
-    servoClose();
-    start = millis();
-    while (millis() - start < 1500 && !testAbortRequested()) { maintainNetwork(); delay(20); }
-  } else {   // sweep: buka-tutup bertahap 2x
-    for (int i = 0; i < 2 && !testAbortRequested(); i++) {
-      servoOpen();
-      start = millis();
-      while (millis() - start < 900 && !testAbortRequested()) { maintainNetwork(); delay(20); }
-      servoClose();
-      start = millis();
-      while (millis() - start < 900 && !testAbortRequested()) { maintainNetwork(); delay(20); }
-    }
-  }
-  testStopRequested = false;
-  lcd.clear(); lcdLine(0, "TEST SERVO"); lcdLine(1, "Selesai"); delay(800); lcd.clear();
-}
-
-void testSpinnerAction(int seconds, uint8_t pwm, int dir) {
-  lcd.clear(); lcdLine(0, "TEST SPINNER"); lcdLine(1, (dir == 2 ? "CCW P:" : "CW P:") + String(pwm));
-  if (dir == 2) spinnerCCWPWM(pwm); else spinnerCWPWM(pwm);
-  unsigned long start = millis();
-  while ((millis() - start) < (unsigned long)seconds * 1000UL && !testAbortRequested()) {
-    maintainNetwork(); delay(20);
-  }
-  spinnerStop();
-  testStopRequested = false;
-  lcd.clear(); lcdLine(0, "TEST SPINNER"); lcdLine(1, "Selesai"); delay(800); lcd.clear();
-}
-
-void testAugerAction(int seconds, const char* dir) {
-  lcd.clear(); lcdLine(0, "TEST AUGER"); lcdLine(1, dir);
-  stepperEnable();
-  int dirLevel = (strcmp(dir, "mundur") == 0) ? STEPPER_DIR_CCW : STEPPER_DIR_CW;
-  unsigned long start = millis();
-  while ((millis() - start) < (unsigned long)seconds * 1000UL && !testAbortRequested()) {
-    maintainNetwork();
-    stepperRunBlock(dirLevel, 10, AUGER_FAST_DELAY_US);
-  }
-  stepperDisable();
-  testStopRequested = false;
-  lcd.clear(); lcdLine(0, "TEST AUGER"); lcdLine(1, "Selesai"); delay(800); lcd.clear();
-}
-
-// =====================================================
 // TARE
 // =====================================================
 void tareChamber() {
@@ -2020,12 +1810,7 @@ bool runSingleBatch(float targetGram, int batchIndex, int batchNo, int totalBatc
   lcd.clear(); lcdLine(0,"FEED BATCH"); lcdLine(1,"B:" + String(batchNo) + "/" + String(totalBatches)); delay(900);
   lcd.clear(); lcdLine(0,"Target Batch"); lcdLine(1, String(targetGram,1) + "g"); delay(900);
 
-  // Tegaskan ulang pintu tertutup SEBELUM auger mulai mengisi -- beri jeda
-  // supaya servo benar2 sampai posisi tertutup (sebelumnya langsung lanjut
-  // tanpa jeda, jadi tidak ada jaminan pintu sudah benar2 nutup saat auger
-  // mulai jalan).
   servoClose(); spinnerStop(); stepperDisable();
-  delay(500);
 
   lcd.clear(); lcdLine(0,"Tare Chamber"); lcdLine(1,"Pastikan kosong"); delay(1000);
   if (scaleChamber.is_ready()) { scaleChamber.tare(25); chamberFiltered = 0.0; }
@@ -2047,10 +1832,9 @@ bool runSingleBatch(float targetGram, int batchIndex, int batchNo, int totalBatc
 
   unsigned long fillStart = millis();
   unsigned long lastLCD   = 0;
-  unsigned long fillStepsSoFar = 0;
   float gram = 0.0;
 
-  // ---- FILL LOOP (3 fase: pelan-di-awal -> cepat -> pelan-mendekati target) ----
+  // ---- FILL LOOP ----
   while (true) {
     maintainNetwork();
     if (backPressed()) {
@@ -2067,19 +1851,9 @@ bool runSingleBatch(float targetGram, int batchIndex, int batchNo, int totalBatc
       setError("FILL_TIMEOUT", "Auger fill timeout");
       return false;
     }
-    int stepDelay, blockSteps;
-    if (fillStepsSoFar < (unsigned long)FILL_SLOWSTART_STEPS) {
-      // Fase 1: pelan di awal (~2-3 putaran) -- hindari hentakan/lonjakan pakan.
-      stepDelay = AUGER_SLOW_DELAY_US; blockSteps = 3;
-    } else if (gram >= slowStartGram) {
-      // Fase 3: pelan mendekati target (FEED_SLOW_ZONE_G terakhir).
-      stepDelay = AUGER_SLOW_DELAY_US; blockSteps = 3;
-    } else {
-      // Fase 2: cepat di tengah.
-      stepDelay = AUGER_FAST_DELAY_US; blockSteps = 10;
-    }
+    int stepDelay  = (gram >= slowStartGram) ? AUGER_SLOW_DELAY_US : AUGER_FAST_DELAY_US;
+    int blockSteps = (gram >= slowStartGram) ? 3 : 10;
     stepperRunBlock(AUGER_FILL_DIR, blockSteps, stepDelay);
-    fillStepsSoFar += blockSteps;
     if (millis() - lastLCD >= 300) {
       lastLCD = millis();
       lcdLine(0, "FILL B:" + String(batchNo) + "/" + String(totalBatches));
@@ -2097,14 +1871,6 @@ bool runSingleBatch(float targetGram, int batchIndex, int batchNo, int totalBatc
   if (finalGram < (targetGram - FEED_FINE_TOLERANCE_G)) {
     lcd.clear(); lcdLine(0,"FINE TUNING"); lcdLine(1, formatGram(finalGram) + "g->" + String(targetGram,0));
     unsigned long fineStart = millis();
-    // Enable motor SEKALI di awal (bukan tiap siklus nyicil) -- sebelumnya tiap
-    // siklus panggil stepperEnable()+stepperDisable() yang masing2 punya delay(300)
-    // internal, jadi ~600ms overhead PER SIKLUS di luar 400ms settle & gerak nyicil
-    // itu sendiri (~40ms). FILL LOOP di atas sudah membuktikan baca berat sambil
-    // stepper tetap enabled itu aman (dipakai terus2an di situ tanpa masalah
-    // akurasi) -- pola yang sama diterapkan di sini. Disable SEKALI di akhir,
-    // baik loop selesai normal (target tercapai) maupun lewat timeout di bawah.
-    stepperEnable();
     while (finalGram < (targetGram - FEED_FINE_TOLERANCE_G)) {
       maintainNetwork();
       if (backPressed()) {
@@ -2117,13 +1883,14 @@ bool runSingleBatch(float targetGram, int batchIndex, int batchNo, int totalBatc
         lcd.clear(); lcdLine(0,"FINE TIMEOUT"); lcdLine(1,"Lanjut buka");
         delay(800); lcd.clear(); break;
       }
+      stepperEnable();
       stepperRunBlock(AUGER_FILL_DIR, FEED_FINE_TRICKLE_STEPS, AUGER_SLOW_DELAY_US);
+      stepperDisable();
       delay(FEED_FINE_SETTLE_MS);
       finalGram = readChamberInstantGram();
       lcdLine(0, "FINE TUNING");
       lcdLine(1, formatGram(finalGram) + "g->" + String(targetGram,0));
     }
-    stepperDisable();
     lcd.clear();
   }
 
@@ -2140,9 +1907,9 @@ bool runSingleBatch(float targetGram, int batchIndex, int batchNo, int totalBatc
   spinnerUpdatePWM(batchIndex, batchPWM);
   delay(SPINNER_PRESTART_MS);
 
-  // ---- BUKA TRAPDOOR (bertahap, bukan sekaligus) ----
+  // ---- BUKA TRAPDOOR ----
   lcd.clear(); lcdLine(0,"SERVO OPEN"); lcdLine(1,"Dispensing...");
-  servoOpenGradual();
+  servoOpen();
 
   unsigned long dispenseStart = millis();
   lastLCD = 0;
@@ -2294,7 +2061,6 @@ void showTareMenu()     { lcdLine(0,"KALIBRASI/TARE"); lcdLine(1,">" + tareMenu[
 void showHistoryMenu()  { lcdLine(0,"RIWAYAT AKHIR"); lcdLine(1,">" + historyMenu[historyMenuIndex]); }
 void showSettingsMenu() { lcdLine(0,"PENGATURAN"); lcdLine(1,">" + settingsMenu[settingsMenuIndex]); }
 void showDataKolamMenu(){ lcdLine(0,"DATA KOLAM"); lcdLine(1,">" + dataKolamMenu[dataKolamMenuIndex]); }
-void showTestMenu()     { lcdLine(0,"TEST AKTUATOR"); lcdLine(1,">" + testMenu[testMenuIndex]); }
 
 void showStatus() {
   if (statusPage == 0) {
@@ -2525,7 +2291,6 @@ void handleMainMenu() {
       case 5: currentScreen = SCREEN_TARE_MENU;      break;
       case 6: currentScreen = SCREEN_HISTORY_MENU;   break;
       case 7: currentScreen = SCREEN_SETTINGS_MENU;  break;
-      case 8: currentScreen = SCREEN_TEST_MENU;      break;
     }
     publishDeviceStatus(true);
   }
@@ -2758,23 +2523,6 @@ void handleTareMenu() {
   showTareMenu();
 }
 
-void handleTestMenu() {
-  if (prevPressed()) { testMenuIndex = (testMenuIndex - 1 + TEST_MENU_COUNT) % TEST_MENU_COUNT; lcd.clear(); }
-  if (nextPressed()) { testMenuIndex = (testMenuIndex + 1) % TEST_MENU_COUNT; lcd.clear(); }
-  if (backPressed()) { currentScreen = SCREEN_MAIN_MENU; lcd.clear(); publishDeviceStatus(true); return; }
-  if (okPressed()) {
-    if (feedingInProgress) {
-      lcd.clear(); lcdLine(0,"Sedang feeding"); lcdLine(1,"Tunggu selesai"); delay(1200);
-    } else {
-      if      (testMenuIndex == 0) testServoAction("sweep");
-      else if (testMenuIndex == 1) testSpinnerAction(3, 200, 1);
-      else if (testMenuIndex == 2) testAugerAction(3, "maju");
-    }
-    lcd.clear();
-  }
-  showTestMenu();
-}
-
 void showHistorySelected() {
   lcd.clear();
   if      (historyMenuIndex == 0) { lcdLine(0, lastFeedSuccess ? "LAST FEED OK" : "LAST FEED FAIL"); lcdLine(1,"Act:" + fmt1(lastFeedActualGram) + "g"); }
@@ -2865,7 +2613,6 @@ void setup() {
     if (rtc.lostPower()) {
       // Fallback ke waktu kompilasi sebagai minimum (akan di-override NTP)
       rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-      rtcLostPowerAtBoot = true;
       Serial.println("  RTC lost power: set waktu kompilasi sebagai fallback sementara");
     }
     resetScheduleDailyFlagsIfNeeded();
@@ -3077,7 +2824,6 @@ void otaCheckSelf() {
 void loop() {
   maintainNetwork();
   publishDeviceStatus(false);
-  flushPendingPublishes();
   otaConfirmHealthy();
   processPendingOTA();
   processPendingCommand();
@@ -3106,7 +2852,6 @@ void loop() {
     case SCREEN_WIFI_STATUS:          handleWiFiStatus();         break;
     case SCREEN_RTC_STATUS:           handleRtcStatus();          break;
     case SCREEN_DEVICE_INFO:          handleDeviceInfo();         break;
-    case SCREEN_TEST_MENU:            handleTestMenu();           break;
     default:                                                       break;
   }
 
