@@ -75,7 +75,7 @@ String topicConfig;
 
 // ===================== OTA (update firmware jarak jauh) =====================
 // v3.9: HTTPS pull + verifikasi sha256 (mbedtls) + rollback dual-partition.
-const char* FIRMWARE_VERSION = "3.9.3";
+const char* FIRMWARE_VERSION = "3.9.4";
 // Host dashboard (lewat Cloudflare) untuk self-check manifest. URL unduh .bin
 // yang sesungguhnya datang dari manifest MQTT (backend), jadi ini hanya utk poll.
 const char* OTA_API_HOST = "aquaculture.trin-polman.id";   // ganti ke domain dashboard Anda
@@ -282,8 +282,14 @@ const int MAX_BATCH_COUNT = 80;
 float batchTargets[MAX_BATCH_COUNT];
 int   batchTargetCount = 0;
 
-const float FEED_SLOW_ZONE_G    = 10.0;
+const float FEED_SLOW_ZONE_G    = 4.0;
 const float FEED_STOP_MARGIN_G  = 1.5;
+
+// Jumlah LANGKAH motor (bukan gram) di awal FILL yang sengaja dijalankan pelan,
+// setara kira2 2-3 putaran fisik auger -- supaya tidak ada hentakan/lonjakan
+// pakan di awal. Perlu dikalibrasi langsung di alat: naikkan/turunkan sampai
+// benar2 terasa ~2-3 putaran auger sebelum berpindah ke kecepatan penuh.
+const int FILL_SLOWSTART_STEPS = 40;
 
 const float FEED_FINE_TOLERANCE_G      = 0.2;
 // Dinaikkan dari 7 -> 10 (naikkan lagi/turunkan sambil diuji langsung di alat
@@ -297,7 +303,7 @@ const unsigned long EMPTY_RESIDUE_WAIT_MS  = 3000;
 
 const unsigned long FEED_FILL_TIMEOUT_MS = 120000;
 const unsigned long FEED_SETTLING_MS     = 800;
-const unsigned long SPINNER_PRESTART_MS  = 800;
+const unsigned long SPINNER_PRESTART_MS  = 2500;
 const unsigned long SPINNER_POSTCLOSE_MS = 500;
 const unsigned long DISPENSE_TIMEOUT_MS  = 60000;
 
@@ -527,6 +533,9 @@ void publishFeedSessionStart(String sid, String sname, float total, int batches)
 void publishFeedBatch(String sid, int bn, int tb, float tg, float ag, bool ok);
 void publishFeedSummary(String sid, String sname, float total, float actual, int batches, bool ok);
 void publishError(String code, String msg);
+void servoOpenGradual();
+bool publishOrQueue(const char* topic, String payload);
+void flushPendingPublishes();
 void autoGenerateSchedulesFromFeedingPerDay();
 void tareChamber();
 void tareSampling();
@@ -1276,8 +1285,53 @@ void publishBiomassSummary() {
   mqttPublish(TOPIC_BIOMASS_SUMMARY, p);
 }
 
+// =====================================================
+// ANTRIAN KIRIM-ULANG OFFLINE (event pakan: session/batch/summary)
+// =====================================================
+// Disimpan di RAM (bukan flash/NVS) -- masalah konektivitas yang teramati di
+// alat ini adalah WiFi/MQTT putus SEMENTARA (detik s/d menit) sementara alat
+// tetap menyala, bukan mati listrik/reboot. Flash/NVS punya batas siklus
+// tulis terbatas; menulis tiap event pakan ke situ (~6-7x per sesi, berkali2
+// sehari) akan mempercepat aus tanpa manfaat nyata untuk skenario yang
+// sebenarnya terjadi. Kalau nanti terbukti alat juga sering benar2 reboot
+// saat ada event pakan yg belum terkirim, baru masuk akal ditambah lapisan
+// flash terpisah -- itu kasus beda dari yang sudah teramati.
+const int PENDING_PUBLISH_MAX = 20;
+struct PendingPublish { String topic; String payload; };
+PendingPublish pendingPublishQueue[PENDING_PUBLISH_MAX];
+int pendingPublishCount = 0;
+
+// Coba kirim langsung; kalau gagal (MQTT belum siap/putus), simpan ke antrian
+// utk dicoba lagi otomatis oleh flushPendingPublishes() begitu tersambung lagi.
+bool publishOrQueue(const char* topic, String payload) {
+  if (mqttPublish(topic, payload)) return true;
+  if (pendingPublishCount >= PENDING_PUBLISH_MAX) {
+    // Antrian penuh -- buang yang PALING LAMA supaya event TERBARU tetap
+    // kebagian slot (lebih berguna drpd event lama yg makin tidak relevan).
+    for (int i = 1; i < PENDING_PUBLISH_MAX; i++) pendingPublishQueue[i - 1] = pendingPublishQueue[i];
+    pendingPublishCount--;
+  }
+  pendingPublishQueue[pendingPublishCount].topic   = topic;
+  pendingPublishQueue[pendingPublishCount].payload = payload;
+  pendingPublishCount++;
+  return false;
+}
+
+// Dipanggil tiap loop() -- kirim ulang isi antrian begitu MQTT tersambung
+// lagi. Dibatasi maks 3 kali kirim per panggilan supaya tidak membanjiri
+// koneksi yang baru saja pulih sekaligus dalam satu waktu.
+void flushPendingPublishes() {
+  if (pendingPublishCount == 0 || !mqttReady()) return;
+  int sent = 0;
+  while (pendingPublishCount > 0 && sent < 3) {
+    if (!mqttClient.publish(pendingPublishQueue[0].topic.c_str(), pendingPublishQueue[0].payload)) break;
+    for (int i = 1; i < pendingPublishCount; i++) pendingPublishQueue[i - 1] = pendingPublishQueue[i];
+    pendingPublishCount--;
+    sent++;
+  }
+}
+
 void publishFeedSessionStart(String sid, String sname, float total, int batches) {
-  if (!mqttReady()) return;
   String p = "{";
   p += "\"device_id\":\""       + String(DEVICE_ID)    + "\",";
   p += "\"timestamp\":\""       + timestampString()     + "\",";
@@ -1288,11 +1342,10 @@ void publishFeedSessionStart(String sid, String sname, float total, int batches)
   p += "\"planned_batch_count\":" + String(batches)     + ",";
   p += "\"max_batch_g\":"       + String(MAX_BATCH_GRAM, 2);
   p += "}";
-  mqttPublish(TOPIC_FEED_SESSION, p);
+  publishOrQueue(TOPIC_FEED_SESSION, p);
 }
 
 void publishFeedBatch(String sid, int bn, int tb, float tg, float ag, bool ok) {
-  if (!mqttReady()) return;
   String dir = ((bn - 1) % 2 == 0) ? "CW" : "CCW";
   String p = "{";
   p += "\"device_id\":\""       + String(DEVICE_ID) + "\",";
@@ -1305,11 +1358,10 @@ void publishFeedBatch(String sid, int bn, int tb, float tg, float ag, bool ok) {
   p += "\"spinner_direction\":\"" + dir              + "\",";
   p += "\"success\":"           + String(ok ? "true" : "false");
   p += "}";
-  mqttPublish(TOPIC_FEED_BATCH, p);
+  publishOrQueue(TOPIC_FEED_BATCH, p);
 }
 
 void publishFeedSummary(String sid, String sname, float total, float actual, int batches, bool ok) {
-  if (!mqttReady()) return;
   String p = "{";
   p += "\"device_id\":\""       + String(DEVICE_ID)    + "\",";
   p += "\"timestamp\":\""       + timestampString()     + "\",";
@@ -1321,7 +1373,7 @@ void publishFeedSummary(String sid, String sname, float total, float actual, int
   p += "\"batch_count\":"       + String(batches)       + ",";
   p += "\"success\":"           + String(ok ? "true" : "false");
   p += "}";
-  mqttPublish(TOPIC_FEED_SUMMARY, p);
+  publishOrQueue(TOPIC_FEED_SUMMARY, p);
 }
 
 // =====================================================
@@ -1678,6 +1730,23 @@ void servoInitClose() {
 void servoOpen()  { doorServo.write(SERVO_OPEN_ANGLE);  servoCommandAngle = SERVO_OPEN_ANGLE;  }
 void servoClose() { doorServo.write(SERVO_CLOSE_ANGLE); servoCommandAngle = SERVO_CLOSE_ANGLE; }
 
+// Buka pintu BERTAHAP (bukan langsung lompat ke sudut penuh) -- supaya pakan
+// yang tertampung di atas mengalir pelan-pelan ke spinner, bukan tumpah
+// sekaligus menimpa sisa pakan yang mungkin masih nyangkut di piringan
+// spinner dari batch sebelumnya.
+void servoOpenGradual() {
+  int fromAngle = SERVO_CLOSE_ANGLE;
+  int toAngle   = SERVO_OPEN_ANGLE;
+  int steps     = 4;
+  for (int i = 1; i <= steps; i++) {
+    int angle = fromAngle + (int)((long)(toAngle - fromAngle) * i / steps);
+    doorServo.write(angle);
+    servoCommandAngle = angle;
+    maintainNetwork();
+    delay(150);
+  }
+}
+
 // =====================================================
 // ANTI-CLOG CYCLE: tutup sesaat lalu buka lagi
 // =====================================================
@@ -1951,7 +2020,12 @@ bool runSingleBatch(float targetGram, int batchIndex, int batchNo, int totalBatc
   lcd.clear(); lcdLine(0,"FEED BATCH"); lcdLine(1,"B:" + String(batchNo) + "/" + String(totalBatches)); delay(900);
   lcd.clear(); lcdLine(0,"Target Batch"); lcdLine(1, String(targetGram,1) + "g"); delay(900);
 
+  // Tegaskan ulang pintu tertutup SEBELUM auger mulai mengisi -- beri jeda
+  // supaya servo benar2 sampai posisi tertutup (sebelumnya langsung lanjut
+  // tanpa jeda, jadi tidak ada jaminan pintu sudah benar2 nutup saat auger
+  // mulai jalan).
   servoClose(); spinnerStop(); stepperDisable();
+  delay(500);
 
   lcd.clear(); lcdLine(0,"Tare Chamber"); lcdLine(1,"Pastikan kosong"); delay(1000);
   if (scaleChamber.is_ready()) { scaleChamber.tare(25); chamberFiltered = 0.0; }
@@ -1973,9 +2047,10 @@ bool runSingleBatch(float targetGram, int batchIndex, int batchNo, int totalBatc
 
   unsigned long fillStart = millis();
   unsigned long lastLCD   = 0;
+  unsigned long fillStepsSoFar = 0;
   float gram = 0.0;
 
-  // ---- FILL LOOP ----
+  // ---- FILL LOOP (3 fase: pelan-di-awal -> cepat -> pelan-mendekati target) ----
   while (true) {
     maintainNetwork();
     if (backPressed()) {
@@ -1992,9 +2067,19 @@ bool runSingleBatch(float targetGram, int batchIndex, int batchNo, int totalBatc
       setError("FILL_TIMEOUT", "Auger fill timeout");
       return false;
     }
-    int stepDelay  = (gram >= slowStartGram) ? AUGER_SLOW_DELAY_US : AUGER_FAST_DELAY_US;
-    int blockSteps = (gram >= slowStartGram) ? 3 : 10;
+    int stepDelay, blockSteps;
+    if (fillStepsSoFar < (unsigned long)FILL_SLOWSTART_STEPS) {
+      // Fase 1: pelan di awal (~2-3 putaran) -- hindari hentakan/lonjakan pakan.
+      stepDelay = AUGER_SLOW_DELAY_US; blockSteps = 3;
+    } else if (gram >= slowStartGram) {
+      // Fase 3: pelan mendekati target (FEED_SLOW_ZONE_G terakhir).
+      stepDelay = AUGER_SLOW_DELAY_US; blockSteps = 3;
+    } else {
+      // Fase 2: cepat di tengah.
+      stepDelay = AUGER_FAST_DELAY_US; blockSteps = 10;
+    }
     stepperRunBlock(AUGER_FILL_DIR, blockSteps, stepDelay);
+    fillStepsSoFar += blockSteps;
     if (millis() - lastLCD >= 300) {
       lastLCD = millis();
       lcdLine(0, "FILL B:" + String(batchNo) + "/" + String(totalBatches));
@@ -2055,9 +2140,9 @@ bool runSingleBatch(float targetGram, int batchIndex, int batchNo, int totalBatc
   spinnerUpdatePWM(batchIndex, batchPWM);
   delay(SPINNER_PRESTART_MS);
 
-  // ---- BUKA TRAPDOOR ----
+  // ---- BUKA TRAPDOOR (bertahap, bukan sekaligus) ----
   lcd.clear(); lcdLine(0,"SERVO OPEN"); lcdLine(1,"Dispensing...");
-  servoOpen();
+  servoOpenGradual();
 
   unsigned long dispenseStart = millis();
   lastLCD = 0;
@@ -2992,6 +3077,7 @@ void otaCheckSelf() {
 void loop() {
   maintainNetwork();
   publishDeviceStatus(false);
+  flushPendingPublishes();
   otaConfirmHealthy();
   processPendingOTA();
   processPendingCommand();
