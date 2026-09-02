@@ -75,7 +75,7 @@ String topicConfig;
 
 // ===================== OTA (update firmware jarak jauh) =====================
 // v3.9: HTTPS pull + verifikasi sha256 (mbedtls) + rollback dual-partition.
-const char* FIRMWARE_VERSION = "3.9.2";
+const char* FIRMWARE_VERSION = "3.9.3";
 // Host dashboard (lewat Cloudflare) untuk self-check manifest. URL unduh .bin
 // yang sesungguhnya datang dari manifest MQTT (backend), jadi ini hanya utk poll.
 const char* OTA_API_HOST = "aquaculture.trin-polman.id";   // ganti ke domain dashboard Anda
@@ -139,7 +139,7 @@ HX711 scaleSampling;
 Servo doorServo;
 
 const int SERVO_CLOSE_ANGLE = 71;
-const int SERVO_OPEN_ANGLE  = 85;
+const int SERVO_OPEN_ANGLE  = 84;
 int servoCommandAngle = SERVO_CLOSE_ANGLE;
 
 // =====================================================
@@ -286,7 +286,11 @@ const float FEED_SLOW_ZONE_G    = 10.0;
 const float FEED_STOP_MARGIN_G  = 1.5;
 
 const float FEED_FINE_TOLERANCE_G      = 0.2;
-const int   FEED_FINE_TRICKLE_STEPS   = 7;
+// Dinaikkan dari 7 -> 10 (naikkan lagi/turunkan sambil diuji langsung di alat
+// kalau ternyata sering overshoot lewat target atau kurang presisi) supaya
+// jumlah siklus nyicil yang dibutuhkan lebih sedikit -- tiap siklus tetap
+// perlu waktu settle yang sama, jadi makin sedikit siklus = makin cepat total.
+const int   FEED_FINE_TRICKLE_STEPS   = 10;
 const unsigned long FEED_FINE_SETTLE_MS    = 400;
 const unsigned long FEED_FINE_TIMEOUT_MS   = 120000;
 const unsigned long EMPTY_RESIDUE_WAIT_MS  = 3000;
@@ -1636,11 +1640,11 @@ float interpolateFeedingRate(float w, float wL, float rL, float wH, float rH) {
 //
 // ============================================================
 float recommendedFeedingRatePercent(float g) {
-  if (g <= 2.5)  return 4.0;
-  if (g <= 5.0)  return interpolateFeedingRate(g,  2.5, 4.0,  5.0, 3.0);
-  if (g <= 10.0) return interpolateFeedingRate(g,  5.0, 3.0,  10.0, 2.0);
-  if (g <= 20.0) return 2.0;
-  return 2.0;
+  if (g <= 2.5)  return 3.0;
+  if (g <= 5.0)  return interpolateFeedingRate(g,  2.5, 3.0,  5.0, 3.0);
+  if (g <= 10.0) return interpolateFeedingRate(g,  5.0, 3.0,  10.0, 3.0);
+  if (g <= 20.0) return 3.0;
+  return 3.0;
 }
 
 void updateFeedingRateFromSampling() {
@@ -2008,6 +2012,14 @@ bool runSingleBatch(float targetGram, int batchIndex, int batchNo, int totalBatc
   if (finalGram < (targetGram - FEED_FINE_TOLERANCE_G)) {
     lcd.clear(); lcdLine(0,"FINE TUNING"); lcdLine(1, formatGram(finalGram) + "g->" + String(targetGram,0));
     unsigned long fineStart = millis();
+    // Enable motor SEKALI di awal (bukan tiap siklus nyicil) -- sebelumnya tiap
+    // siklus panggil stepperEnable()+stepperDisable() yang masing2 punya delay(300)
+    // internal, jadi ~600ms overhead PER SIKLUS di luar 400ms settle & gerak nyicil
+    // itu sendiri (~40ms). FILL LOOP di atas sudah membuktikan baca berat sambil
+    // stepper tetap enabled itu aman (dipakai terus2an di situ tanpa masalah
+    // akurasi) -- pola yang sama diterapkan di sini. Disable SEKALI di akhir,
+    // baik loop selesai normal (target tercapai) maupun lewat timeout di bawah.
+    stepperEnable();
     while (finalGram < (targetGram - FEED_FINE_TOLERANCE_G)) {
       maintainNetwork();
       if (backPressed()) {
@@ -2020,14 +2032,13 @@ bool runSingleBatch(float targetGram, int batchIndex, int batchNo, int totalBatc
         lcd.clear(); lcdLine(0,"FINE TIMEOUT"); lcdLine(1,"Lanjut buka");
         delay(800); lcd.clear(); break;
       }
-      stepperEnable();
       stepperRunBlock(AUGER_FILL_DIR, FEED_FINE_TRICKLE_STEPS, AUGER_SLOW_DELAY_US);
-      stepperDisable();
       delay(FEED_FINE_SETTLE_MS);
       finalGram = readChamberInstantGram();
       lcdLine(0, "FINE TUNING");
       lcdLine(1, formatGram(finalGram) + "g->" + String(targetGram,0));
     }
+    stepperDisable();
     lcd.clear();
   }
 
