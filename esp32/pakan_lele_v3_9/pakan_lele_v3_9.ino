@@ -75,7 +75,7 @@ String topicConfig;
 
 // ===================== OTA (update firmware jarak jauh) =====================
 // v3.9: HTTPS pull + verifikasi sha256 (mbedtls) + rollback dual-partition.
-const char* FIRMWARE_VERSION = "3.9.4";
+const char* FIRMWARE_VERSION = "3.9.5";
 // Host dashboard (lewat Cloudflare) untuk self-check manifest. URL unduh .bin
 // yang sesungguhnya datang dari manifest MQTT (backend), jadi ini hanya utk poll.
 const char* OTA_API_HOST = "sipakale.um-km.id";   // ganti ke domain dashboard Anda
@@ -185,6 +185,17 @@ const int AUGER_SLOW_DELAY_US    = 5500;
 // bukan lagi lewat variasi PWM.
 const uint8_t SPINNER_PWM_MAX = 255; // kecepatan spinner, dipakai semua batch
 const uint8_t SPINNER_PWM_MIN = 255; // disamakan dgn MAX -> lihat catatan di atas
+
+// Soft-start spinner: motor DC yang langsung distart di PWM tinggi (0->255
+// instan) menarik arus start (inrush) jauh lebih besar drpd sudah berputar
+// stabil. Kalau suplai daya pas-pasan, lonjakan ini bisa bikin tegangan drop
+// cukup besar sampai mengganggu modul WiFi / reset ESP32 sesaat (teramati
+// langsung: test spinner bikin device offline, test servo -- motor kecil,
+// arus rendah -- aman). PWM dinaikkan bertahap sebagai mitigasi software;
+// TETAP perlu dicek fisik (kapasitor besar dekat motor driver / power
+// terpisah utk motor vs ESP32) kalau soft-start ini belum cukup.
+const int SPINNER_SOFTSTART_STEPS   = 8;
+const unsigned long SPINNER_SOFTSTART_STEP_MS = 40;   // total ramp ~320ms
 
 // SPINNER_RAMP_CURVE: tidak digunakan lagi sejak V3.2.1 (diganti logika ganjil/genap).
 // Dibiarkan agar kompatibel jika suatu saat ramp-down diaktifkan kembali.
@@ -549,6 +560,7 @@ String screenName();
 // V3.2.1: spinner PWM
 void setupSpinnerPWM();
 void spinnerUpdatePWM(int idx, uint8_t duty);
+void spinnerSoftStart(int dir, uint8_t targetDuty);
 uint8_t spinnerPWMForDispense(float chamberGramCurrent, float batchTargetGram);
 
 // =====================================================
@@ -1841,6 +1853,18 @@ void spinnerCCWPWM(uint8_t duty) {
   spinnerCurrentPWM = duty;
 }
 
+// Nyalakan spinner BERTAHAP (ramp PWM 0 -> targetDuty), bukan lompat langsung
+// ke PWM penuh -- lihat catatan SPINNER_SOFTSTART_STEPS di atas. dir: 1=CW
+// (kanan), 2=CCW (kiri) -- konvensi sama dengan command MQTT test_spread.
+void spinnerSoftStart(int dir, uint8_t targetDuty) {
+  for (int i = 1; i <= SPINNER_SOFTSTART_STEPS; i++) {
+    uint8_t duty = (uint8_t)((long)targetDuty * i / SPINNER_SOFTSTART_STEPS);
+    if (dir == 2) spinnerCCWPWM(duty); else spinnerCWPWM(duty);
+    maintainNetwork();
+    delay(SPINNER_SOFTSTART_STEP_MS);
+  }
+}
+
 // Mulai spinner di kecepatan PENUH sesuai arah batch (untuk pre-start)
 void spinnerRunByBatch(int idx) {
   if (idx % 2 == 0) spinnerCWPWM(SPINNER_PWM_MAX);
@@ -1915,7 +1939,7 @@ void testServoAction(const char* action) {
 
 void testSpinnerAction(int seconds, uint8_t pwm, int dir) {
   lcd.clear(); lcdLine(0, "TEST SPINNER"); lcdLine(1, (dir == 2 ? "CCW P:" : "CW P:") + String(pwm));
-  if (dir == 2) spinnerCCWPWM(pwm); else spinnerCWPWM(pwm);
+  spinnerSoftStart(dir, pwm);
   unsigned long start = millis();
   while ((millis() - start) < (unsigned long)seconds * 1000UL && !testAbortRequested()) {
     maintainNetwork(); delay(20);
@@ -2135,9 +2159,10 @@ bool runSingleBatch(float targetGram, int batchIndex, int batchNo, int totalBatc
   // Arah CW/CCW tetap berganti tiap 1 batch untuk sebaran radial di sekitar disc.
 
   uint8_t batchPWM = SPINNER_PWM_MAX;
-  String dirText   = (batchIndex % 2 == 0) ? "CW" : "CCW";
+  bool batchCW     = (batchIndex % 2 == 0);
+  String dirText   = batchCW ? "CW" : "CCW";
   lcd.clear(); lcdLine(0,"SPINNER ON"); lcdLine(1,"Dir:" + dirText + " P:" + String(batchPWM));
-  spinnerUpdatePWM(batchIndex, batchPWM);
+  spinnerSoftStart(batchCW ? 1 : 2, batchPWM);
   delay(SPINNER_PRESTART_MS);
 
   // ---- BUKA TRAPDOOR (bertahap, bukan sekaligus) ----
