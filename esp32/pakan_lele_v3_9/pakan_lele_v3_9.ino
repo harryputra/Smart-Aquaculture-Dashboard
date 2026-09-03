@@ -75,7 +75,7 @@ String topicConfig;
 
 // ===================== OTA (update firmware jarak jauh) =====================
 // v3.9: HTTPS pull + verifikasi sha256 (mbedtls) + rollback dual-partition.
-const char* FIRMWARE_VERSION = "3.9.6";
+const char* FIRMWARE_VERSION = "3.9.7";
 // Host dashboard (lewat Cloudflare) untuk self-check manifest. URL unduh .bin
 // yang sesungguhnya datang dari manifest MQTT (backend), jadi ini hanya utk poll.
 const char* OTA_API_HOST = "sipakale.um-km.id";   // ganti ke domain dashboard Anda
@@ -2441,7 +2441,10 @@ void showRtcStatus() {
 }
 
 void showDeviceInfo() {
-  lcdLine(0,"Pakan Lele"); lcdLine(1,"V4");
+  // Sebelumnya teks tetap "V4" -- tidak pernah mencerminkan FIRMWARE_VERSION
+  // asli, jadi tidak berguna utk memastikan versi yang benar2 sedang jalan
+  // setelah flash/OTA. Diperbaiki menampilkan versi sebenarnya.
+  lcdLine(0,"Pakan Lele"); lcdLine(1,"FW v" + String(FIRMWARE_VERSION));
 }
 
 // =====================================================
