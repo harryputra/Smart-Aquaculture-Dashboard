@@ -75,7 +75,7 @@ String topicConfig;
 
 // ===================== OTA (update firmware jarak jauh) =====================
 // v3.9: HTTPS pull + verifikasi sha256 (mbedtls) + rollback dual-partition.
-const char* FIRMWARE_VERSION = "3.9.7";
+const char* FIRMWARE_VERSION = "3.9.8";
 // Host dashboard (lewat Cloudflare) untuk self-check manifest. URL unduh .bin
 // yang sesungguhnya datang dari manifest MQTT (backend), jadi ini hanya utk poll.
 const char* OTA_API_HOST = "sipakale.um-km.id";   // ganti ke domain dashboard Anda
@@ -2339,9 +2339,12 @@ void showStatus() {
   } else if (statusPage == 1) {
     lcdLine(0, "WiFi:" + String(WiFi.status() == WL_CONNECTED ? "OK" : "OFF"));
     lcdLine(1, "MQTT:" + String(mqttReady() ? "OK" : "OFF"));
-  } else {
+  } else if (statusPage == 2) {
     lcdLine(0, "HX CH:" + String(scaleChamber.is_ready()  ? "OK" : "ERR"));
     lcdLine(1, "HX SM:" + String(scaleSampling.is_ready() ? "OK" : "ERR"));
+  } else {
+    lcdLine(0, "Firmware:");
+    lcdLine(1, "v" + String(FIRMWARE_VERSION));
   }
 }
 
@@ -2571,9 +2574,11 @@ void handleMainMenu() {
   showMainMenu();
 }
 
+const int STATUS_PAGE_COUNT = 4;
+
 void handleStatus() {
-  if (prevPressed()) { statusPage = (statusPage - 1 + 3) % 3; lcd.clear(); }
-  if (nextPressed()) { statusPage = (statusPage + 1) % 3; lcd.clear(); }
+  if (prevPressed()) { statusPage = (statusPage - 1 + STATUS_PAGE_COUNT) % STATUS_PAGE_COUNT; lcd.clear(); }
+  if (nextPressed()) { statusPage = (statusPage + 1) % STATUS_PAGE_COUNT; lcd.clear(); }
   if (backPressed()) { currentScreen = SCREEN_MAIN_MENU; lcd.clear(); publishDeviceStatus(true); return; }
   if (millis() - lastDisplayUpdate >= 500) { lastDisplayUpdate = millis(); showStatus(); }
 }
@@ -2890,7 +2895,7 @@ void setup() {
   Wire.setClock(50000);
   lcd.init(); lcd.backlight(); lcd.clear(); delay(500);
   lcd.init(); lcd.backlight(); lcd.clear();
-  lcdLine(0,"PAKAN LELE"); lcdLine(1,"V4");
+  lcdLine(0,"PAKAN LELE"); lcdLine(1,"FW v" + String(FIRMWARE_VERSION));
   delay(1500);
 
   Serial.println("[BOOT] Step 5: Load Preferences...");
