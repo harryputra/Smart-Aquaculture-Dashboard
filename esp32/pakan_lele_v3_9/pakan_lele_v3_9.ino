@@ -75,7 +75,7 @@ String topicConfig;
 
 // ===================== OTA (update firmware jarak jauh) =====================
 // v3.9: HTTPS pull + verifikasi sha256 (mbedtls) + rollback dual-partition.
-const char* FIRMWARE_VERSION = "3.9.5";
+const char* FIRMWARE_VERSION = "3.9.6";
 // Host dashboard (lewat Cloudflare) untuk self-check manifest. URL unduh .bin
 // yang sesungguhnya datang dari manifest MQTT (backend), jadi ini hanya utk poll.
 const char* OTA_API_HOST = "sipakale.um-km.id";   // ganti ke domain dashboard Anda
@@ -1746,16 +1746,27 @@ void servoClose() { doorServo.write(SERVO_CLOSE_ANGLE); servoCommandAngle = SERV
 // yang tertampung di atas mengalir pelan-pelan ke spinner, bukan tumpah
 // sekaligus menimpa sisa pakan yang mungkin masih nyangkut di piringan
 // spinner dari batch sebelumnya.
+// Rentang sudut servo trapdoor SANGAT sempit (SERVO_CLOSE_ANGLE ke
+// SERVO_OPEN_ANGLE cuma ~13 derajat) -- versi awal (4 langkah @150ms, total
+// ~600ms) ternyata TIDAK terasa bertahap secara fisik: gerakan sekecil itu
+// selesai hampir instan di tiap langkah, jadi pakan tetap terasa "langsung
+// tumpah" (dikonfirmasi langsung oleh user lewat uji "Beri Sekarang").
+// Diperlambat jauh lebih signifikan: lebih banyak langkah (lebih halus per
+// derajat) + jeda jauh lebih lama per langkah (total ~3.2 detik utk buka
+// penuh) supaya pakan benar2 sempat mengalir bertahap, bukan cuma "kode-nya
+// bertahap" tapi hasilnya tetap terasa sekaligus.
+const int SERVO_GRADUAL_STEPS      = 8;
+const unsigned long SERVO_GRADUAL_STEP_MS = 400;   // total ~3.2 detik
+
 void servoOpenGradual() {
   int fromAngle = SERVO_CLOSE_ANGLE;
   int toAngle   = SERVO_OPEN_ANGLE;
-  int steps     = 4;
-  for (int i = 1; i <= steps; i++) {
-    int angle = fromAngle + (int)((long)(toAngle - fromAngle) * i / steps);
+  for (int i = 1; i <= SERVO_GRADUAL_STEPS; i++) {
+    int angle = fromAngle + (int)((long)(toAngle - fromAngle) * i / SERVO_GRADUAL_STEPS);
     doorServo.write(angle);
     servoCommandAngle = angle;
-    maintainNetwork();
-    delay(150);
+    unsigned long stepStart = millis();
+    while (millis() - stepStart < SERVO_GRADUAL_STEP_MS) { maintainNetwork(); delay(20); }
   }
 }
 
