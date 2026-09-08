@@ -75,7 +75,7 @@ String topicConfig;
 
 // ===================== OTA (update firmware jarak jauh) =====================
 // v3.9: HTTPS pull + verifikasi sha256 (mbedtls) + rollback dual-partition.
-const char* FIRMWARE_VERSION = "3.9.11";
+const char* FIRMWARE_VERSION = "3.9.12";
 // Host dashboard (lewat Cloudflare) untuk self-check manifest. URL unduh .bin
 // yang sesungguhnya datang dari manifest MQTT (backend), jadi ini hanya utk poll.
 const char* OTA_API_HOST = "sipakale.um-km.id";   // ganti ke domain dashboard Anda
@@ -138,8 +138,10 @@ HX711 scaleSampling;
 #define SERVO_PIN 13
 Servo doorServo;
 
-const int SERVO_CLOSE_ANGLE = 71;
-const int SERVO_OPEN_ANGLE  = 80;   // dikurangi dari 84, cegah bukaan terlalu lebar
+const int SERVO_CLOSE_ANGLE   = 71;
+const int SERVO_PARTIAL_ANGLE = 83;   // buka sebagian dulu (bertahap) selama dispensing
+const int SERVO_OPEN_ANGLE    = 90;   // buka penuh, dipicu saat berat chamber turun ke ambang
+const float SERVO_FULL_OPEN_THRESHOLD_G = 25.0;   // <= ini baru buka penuh
 int servoCommandAngle = SERVO_CLOSE_ANGLE;
 
 // =====================================================
@@ -266,7 +268,7 @@ const float SAMPLING_FILTER_ALPHA = 0.35;
 float chamberFiltered  = 0.0;
 float samplingFiltered = 0.0;
 
-const float EMPTY_THRESHOLD_G = 5.0;
+const float EMPTY_THRESHOLD_G = 2.0;
 const float MIN_FISH_SAVE_G   = 5.0;
 
 // =====================================================
@@ -310,7 +312,7 @@ const float FEED_FINE_TOLERANCE_G      = 0.2;
 const int   FEED_FINE_TRICKLE_STEPS   = 10;
 const unsigned long FEED_FINE_SETTLE_MS    = 400;
 const unsigned long FEED_FINE_TIMEOUT_MS   = 120000;
-const unsigned long EMPTY_RESIDUE_WAIT_MS  = 3000;
+const unsigned long EMPTY_RESIDUE_WAIT_MS  = 5000;
 
 const unsigned long FEED_FILL_TIMEOUT_MS = 120000;
 const unsigned long FEED_SETTLING_MS     = 800;
@@ -1760,7 +1762,7 @@ const unsigned long SERVO_GRADUAL_STEP_MS = 400;   // total ~3.2 detik
 
 void servoOpenGradual() {
   int fromAngle = SERVO_CLOSE_ANGLE;
-  int toAngle   = SERVO_OPEN_ANGLE;
+  int toAngle   = SERVO_PARTIAL_ANGLE;   // buka penuh (SERVO_OPEN_ANGLE) dipicu belakangan di dispense loop
   for (int i = 1; i <= SERVO_GRADUAL_STEPS; i++) {
     int angle = fromAngle + (int)((long)(toAngle - fromAngle) * i / SERVO_GRADUAL_STEPS);
     doorServo.write(angle);
@@ -2186,6 +2188,7 @@ bool runSingleBatch(float targetGram, int batchIndex, int batchNo, int totalBatc
   // ---- Baseline pemantauan anti-clog ----
   float         anticlogBaselineGram = gram;   // gram terakhir dari fase fine-tuning
   unsigned long anticlogWindowStart  = millis();
+  bool          servoFullyOpened     = false;   // pintu masih di SERVO_PARTIAL_ANGLE sampai gram turun ke ambang
 
   // ---- DISPENSE LOOP: PWM KONSTAN 255 DI SEMUA BATCH ----
   // Kecepatan spinner tidak berubah selama dispensing maupun antar batch.
@@ -2202,6 +2205,15 @@ bool runSingleBatch(float targetGram, int batchIndex, int batchNo, int totalBatc
 
     gram = readChamberInstantGram();
     if (gram <= EMPTY_THRESHOLD_G) break;
+
+    // Baru buka PENUH (SERVO_OPEN_ANGLE) begitu sisa pakan di chamber sudah
+    // turun ke ambang -- sebelum itu pintu tetap di SERVO_PARTIAL_ANGLE
+    // (dibuka bertahap oleh servoOpenGradual()) supaya pakan tidak tumpah
+    // sekaligus saat chamber masih penuh.
+    if (!servoFullyOpened && gram <= SERVO_FULL_OPEN_THRESHOLD_G) {
+      servoOpen();
+      servoFullyOpened = true;
+    }
 
     if (millis() - dispenseStart > DISPENSE_TIMEOUT_MS) {
       lcd.clear(); lcdLine(0,"DISP TIMEOUT"); lcdLine(1,"Cek chamber");
