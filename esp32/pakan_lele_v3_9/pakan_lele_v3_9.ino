@@ -75,7 +75,7 @@ String topicConfig;
 
 // ===================== OTA (update firmware jarak jauh) =====================
 // v3.9: HTTPS pull + verifikasi sha256 (mbedtls) + rollback dual-partition.
-const char* FIRMWARE_VERSION = "3.9.9";
+const char* FIRMWARE_VERSION = "3.9.10";
 // Host dashboard (lewat Cloudflare) untuk self-check manifest. URL unduh .bin
 // yang sesungguhnya datang dari manifest MQTT (backend), jadi ini hanya utk poll.
 const char* OTA_API_HOST = "sipakale.um-km.id";   // ganti ke domain dashboard Anda
@@ -139,7 +139,7 @@ HX711 scaleSampling;
 Servo doorServo;
 
 const int SERVO_CLOSE_ANGLE = 71;
-const int SERVO_OPEN_ANGLE  = 84;
+const int SERVO_OPEN_ANGLE  = 80;   // dikurangi dari 84, cegah bukaan terlalu lebar
 int servoCommandAngle = SERVO_CLOSE_ANGLE;
 
 // =====================================================
@@ -286,7 +286,7 @@ const int           SAMPLING_HIST_MAX_BIN = SAMPLING_HIST_MAX_G * SAMPLING_HIST_
 // =====================================================
 // FEEDING PARAMETER
 // =====================================================
-const float MAX_BATCH_GRAM        = 100.0;
+const float MAX_BATCH_GRAM        = 80.0;   // dikurangi dari 100, pelet makin besar/volume makin penuh -> cegah macet
 const float MIN_STABLE_BATCH_GRAM = 30.0;
 
 const int MAX_BATCH_COUNT = 80;
