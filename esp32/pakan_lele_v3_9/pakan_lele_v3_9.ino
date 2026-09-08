@@ -75,7 +75,7 @@ String topicConfig;
 
 // ===================== OTA (update firmware jarak jauh) =====================
 // v3.9: HTTPS pull + verifikasi sha256 (mbedtls) + rollback dual-partition.
-const char* FIRMWARE_VERSION = "3.9.13";
+const char* FIRMWARE_VERSION = "3.9.14";
 // Host dashboard (lewat Cloudflare) untuk self-check manifest. URL unduh .bin
 // yang sesungguhnya datang dari manifest MQTT (backend), jadi ini hanya utk poll.
 const char* OTA_API_HOST = "sipakale.um-km.id";   // ganti ke domain dashboard Anda
@@ -1676,6 +1676,23 @@ float readChamberInstantGram() {
   return raw;
 }
 
+// Butuh beberapa kali baca berturut-turut <= EMPTY_THRESHOLD_G sebelum
+// dianggap benar2 kosong -- satu baca sesaat rentan glitch (mis. noise
+// elektrik saat spinner arah CCW, teramati bikin chamber kebaca kosong
+// padahal fisiknya masih penuh khusus di batch genap/arah CCW). Glitch
+// sesaat gagal di salah satu baca -> loop dispense lanjut normal.
+const int EMPTY_CONFIRM_READS = 3;
+const unsigned long EMPTY_CONFIRM_GAP_MS = 150;
+
+bool confirmChamberEmpty() {
+  for (int i = 0; i < EMPTY_CONFIRM_READS; i++) {
+    if (readChamberInstantGram() > EMPTY_THRESHOLD_G) return false;
+    maintainNetwork();
+    delay(EMPTY_CONFIRM_GAP_MS);
+  }
+  return true;
+}
+
 // =====================================================
 // ADAPTIVE CALCULATION
 // =====================================================
@@ -2223,7 +2240,7 @@ bool runSingleBatch(float targetGram, int batchIndex, int batchNo, int totalBatc
     }
 
     gram = readChamberInstantGram();
-    if (gram <= EMPTY_THRESHOLD_G) break;
+    if (gram <= EMPTY_THRESHOLD_G && confirmChamberEmpty()) break;
 
     // Baru buka PENUH (SERVO_OPEN_ANGLE) begitu sisa pakan di chamber sudah
     // turun ke ambang -- sebelum itu pintu tetap di SERVO_PARTIAL_ANGLE
@@ -2258,7 +2275,7 @@ bool runSingleBatch(float targetGram, int batchIndex, int batchNo, int totalBatc
           return false;
         }
         gram = readChamberInstantGram();
-        if (gram <= EMPTY_THRESHOLD_G) break;
+        if (gram <= EMPTY_THRESHOLD_G && confirmChamberEmpty()) break;
       }
       anticlogBaselineGram = gram;
       anticlogWindowStart  = millis();
@@ -2279,6 +2296,18 @@ bool runSingleBatch(float targetGram, int batchIndex, int batchNo, int totalBatc
     maintainNetwork();
     if (backPressed()) break;
     delay(30);
+  }
+
+  // ---- Batch TERAKHIR: verifikasi ekstra, gak ada batch berikutnya yang
+  // bakal ngecek sisa (RESIDUE_DETECTED cuma jalan di AWAL batch berikutnya) ----
+  if (batchNo == totalBatches && !confirmChamberEmpty()) {
+    float leftover = readChamberInstantGram();
+    lcd.clear(); lcdLine(0,"SISA AKHIR"); lcdLine(1, fmt1(leftover) + "g, keluarkan");
+    setError("RESIDUE_DETECTED", "Sisa " + String(leftover,0) + "g di batch terakhir");
+    spinnerCWPWM(SPINNER_PWM_MAX);
+    unsigned long extraStart = millis();
+    while (millis() - extraStart < 4000) { maintainNetwork(); delay(20); }
+    spinnerStop();
   }
 
   // ---- TUTUP PINTU + STOP SPINNER ----
