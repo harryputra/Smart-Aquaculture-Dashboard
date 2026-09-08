@@ -75,7 +75,7 @@ String topicConfig;
 
 // ===================== OTA (update firmware jarak jauh) =====================
 // v3.9: HTTPS pull + verifikasi sha256 (mbedtls) + rollback dual-partition.
-const char* FIRMWARE_VERSION = "3.9.12";
+const char* FIRMWARE_VERSION = "3.9.13";
 // Host dashboard (lewat Cloudflare) untuk self-check manifest. URL unduh .bin
 // yang sesungguhnya datang dari manifest MQTT (backend), jadi ini hanya utk poll.
 const char* OTA_API_HOST = "sipakale.um-km.id";   // ganti ke domain dashboard Anda
@@ -2063,6 +2063,25 @@ bool runSingleBatch(float targetGram, int batchIndex, int batchNo, int totalBatc
   // mulai jalan).
   servoClose(); spinnerStop(); stepperDisable();
   delay(500);
+
+  // Cek sisa SEBELUM tare -- tare menimpa berat jadi 0 walau masih ada sisa
+  // fisik dari batch sebelumnya (nyangkut/gak abis kekeluar), bikin sisa itu
+  // jadi "nol" baru & tak pernah kelihatan sensor lagi, numpuk terus tiap
+  // batch. Kalau kedeteksi, coba keluarkan dulu (spinner+pintu sesaat)
+  // sebelum tare, dan catat sebagai error supaya kelihatan di riwayat.
+  if (scaleChamber.is_ready()) {
+    float preTare = readChamberInstantGram();
+    if (preTare > EMPTY_THRESHOLD_G) {
+      lcd.clear(); lcdLine(0,"SISA TERDETEKSI"); lcdLine(1, fmt1(preTare) + "g, keluarkan");
+      setError("RESIDUE_DETECTED", "Sisa " + String(preTare,0) + "g sebelum batch " + String(batchNo));
+      spinnerCWPWM(SPINNER_PWM_MAX);
+      servoOpen();
+      unsigned long clearStart = millis();
+      while (millis() - clearStart < 3000) { maintainNetwork(); delay(20); }
+      servoClose(); delay(500); spinnerStop();
+      delay(300);
+    }
+  }
 
   lcd.clear(); lcdLine(0,"Tare Chamber"); lcdLine(1,"Pastikan kosong"); delay(1000);
   if (scaleChamber.is_ready()) { scaleChamber.tare(25); chamberFiltered = 0.0; }
