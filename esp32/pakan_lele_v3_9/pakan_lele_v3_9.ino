@@ -75,7 +75,7 @@ String topicConfig;
 
 // ===================== OTA (update firmware jarak jauh) =====================
 // v3.9: HTTPS pull + verifikasi sha256 (mbedtls) + rollback dual-partition.
-const char* FIRMWARE_VERSION = "3.9.15";
+const char* FIRMWARE_VERSION = "3.9.16";
 // Host dashboard (lewat Cloudflare) untuk self-check manifest. URL unduh .bin
 // yang sesungguhnya datang dari manifest MQTT (backend), jadi ini hanya utk poll.
 const char* OTA_API_HOST = "sipakale.um-km.id";   // ganti ke domain dashboard Anda
@@ -288,7 +288,7 @@ const int           SAMPLING_HIST_MAX_BIN = SAMPLING_HIST_MAX_G * SAMPLING_HIST_
 // =====================================================
 // FEEDING PARAMETER
 // =====================================================
-const float MAX_BATCH_GRAM        = 80.0;   // dikurangi dari 100, pelet makin besar/volume makin penuh -> cegah macet
+const float MAX_BATCH_GRAM        = 50.0;   // dikurangi dari 80, chamber terasa padat -> cegah macet
 const float MIN_STABLE_BATCH_GRAM = 30.0;
 
 const int MAX_BATCH_COUNT = 80;
