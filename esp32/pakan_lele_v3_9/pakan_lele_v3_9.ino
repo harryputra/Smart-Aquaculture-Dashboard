@@ -75,7 +75,7 @@ String topicConfig;
 
 // ===================== OTA (update firmware jarak jauh) =====================
 // v3.9: HTTPS pull + verifikasi sha256 (mbedtls) + rollback dual-partition.
-const char* FIRMWARE_VERSION = "3.9.10";
+const char* FIRMWARE_VERSION = "3.9.11";
 // Host dashboard (lewat Cloudflare) untuk self-check manifest. URL unduh .bin
 // yang sesungguhnya datang dari manifest MQTT (backend), jadi ini hanya utk poll.
 const char* OTA_API_HOST = "sipakale.um-km.id";   // ganti ke domain dashboard Anda
@@ -129,7 +129,7 @@ HX711 scaleSampling;
 // =====================================================
 #define BTN_UP   4
 #define BTN_DOWN 16
-#define BTN_OK   17
+#define BTN_OK   15
 #define BTN_BACK 27
 
 // =====================================================
@@ -1409,15 +1409,9 @@ bool buttonPressed(ButtonID id) {
   return false;
 }
 
-// SEMENTARA: tombol OK fisik/kabel rusak. UP dialihkan jadi OK, UP asli
-// dimatikan (cegah dobel-aksi tiap tekan). Navigasi sementara pakai DOWN
-// saja (memutar/wrap ke semua item) + OK(=UP) + BACK. Kembalikan ke baris
-// asli begitu tombol/kabel OK diperbaiki:
-//   bool nextPressed() { return buttonPressed(B_UP);   }
-//   bool okPressed()   { return buttonPressed(B_OK);    }
-bool nextPressed() { return false; }
+bool nextPressed() { return buttonPressed(B_UP);   }
 bool prevPressed() { return buttonPressed(B_DOWN);  }
-bool okPressed()   { return buttonPressed(B_UP);    }
+bool okPressed()   { return buttonPressed(B_OK);    }
 bool backPressed() { return buttonPressed(B_BACK);  }
 
 // =====================================================
