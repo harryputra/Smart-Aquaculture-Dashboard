@@ -75,7 +75,7 @@ String topicConfig;
 
 // ===================== OTA (update firmware jarak jauh) =====================
 // v3.9: HTTPS pull + verifikasi sha256 (mbedtls) + rollback dual-partition.
-const char* FIRMWARE_VERSION = "3.9.14";
+const char* FIRMWARE_VERSION = "3.9.15";
 // Host dashboard (lewat Cloudflare) untuk self-check manifest. URL unduh .bin
 // yang sesungguhnya datang dari manifest MQTT (backend), jadi ini hanya utk poll.
 const char* OTA_API_HOST = "sipakale.um-km.id";   // ganti ke domain dashboard Anda
@@ -1684,6 +1684,16 @@ float readChamberInstantGram() {
 const int EMPTY_CONFIRM_READS = 3;
 const unsigned long EMPTY_CONFIRM_GAP_MS = 150;
 
+// Verifikasi aktif sisa pakan sebelum batch mulai (bukan cuma pasif baca
+// angka) -- maks percobaan buka-pintu+spinner sebelum lanjut walau masih
+// ada sisa (cegah macet nunggu selamanya kalau sensor/mekanis bermasalah).
+const int PRE_BATCH_CLEAR_MAX_TRIES = 5;
+
+// Verifikasi ekstra khusus batch TERAKHIR sebelum sesi selesai (toleransi
+// lebih longgar dari EMPTY_THRESHOLD_G, sesuai arahan user).
+const float FINAL_CLEAR_TOLERANCE_G = 3.0;
+const int   FINAL_CLEAR_MAX_TRIES   = 5;
+
 bool confirmChamberEmpty() {
   for (int i = 0; i < EMPTY_CONFIRM_READS; i++) {
     if (readChamberInstantGram() > EMPTY_THRESHOLD_G) return false;
@@ -2081,16 +2091,18 @@ bool runSingleBatch(float targetGram, int batchIndex, int batchNo, int totalBatc
   servoClose(); spinnerStop(); stepperDisable();
   delay(500);
 
-  // Cek sisa SEBELUM tare -- tare menimpa berat jadi 0 walau masih ada sisa
-  // fisik dari batch sebelumnya (nyangkut/gak abis kekeluar), bikin sisa itu
-  // jadi "nol" baru & tak pernah kelihatan sensor lagi, numpuk terus tiap
-  // batch. Kalau kedeteksi, coba keluarkan dulu (spinner+pintu sesaat)
-  // sebelum tare, dan catat sebagai error supaya kelihatan di riwayat.
+  // Pastikan chamber BENAR2 kosong sebelum batch mulai -- bukan cuma percaya
+  // satu baca berat (tare menimpa jadi 0 walau masih ada sisa fisik dari
+  // batch sebelumnya, bikin sisa itu tak pernah kelihatan sensor lagi &
+  // numpuk terus tiap batch). Aktif buka pintu + jalankan spinner utk
+  // memastikan, ulangi kalau confirmChamberEmpty() masih gagal (maks
+  // PRE_BATCH_CLEAR_MAX_TRIES kali) sebelum lanjut tare & fill.
   if (scaleChamber.is_ready()) {
-    float preTare = readChamberInstantGram();
-    if (preTare > EMPTY_THRESHOLD_G) {
-      lcd.clear(); lcdLine(0,"SISA TERDETEKSI"); lcdLine(1, fmt1(preTare) + "g, keluarkan");
-      setError("RESIDUE_DETECTED", "Sisa " + String(preTare,0) + "g sebelum batch " + String(batchNo));
+    for (int t = 0; t < PRE_BATCH_CLEAR_MAX_TRIES; t++) {
+      if (confirmChamberEmpty()) break;
+      float leftover = readChamberInstantGram();
+      lcd.clear(); lcdLine(0,"CEK SISA AWAL"); lcdLine(1, fmt1(leftover) + "g, coba " + String(t + 1));
+      setError("RESIDUE_DETECTED", "Sisa " + String(leftover,0) + "g sebelum batch " + String(batchNo) + " (coba " + String(t + 1) + ")");
       spinnerCWPWM(SPINNER_PWM_MAX);
       servoOpen();
       unsigned long clearStart = millis();
@@ -2298,16 +2310,25 @@ bool runSingleBatch(float targetGram, int batchIndex, int batchNo, int totalBatc
     delay(30);
   }
 
-  // ---- Batch TERAKHIR: verifikasi ekstra, gak ada batch berikutnya yang
-  // bakal ngecek sisa (RESIDUE_DETECTED cuma jalan di AWAL batch berikutnya) ----
-  if (batchNo == totalBatches && !confirmChamberEmpty()) {
-    float leftover = readChamberInstantGram();
-    lcd.clear(); lcdLine(0,"SISA AKHIR"); lcdLine(1, fmt1(leftover) + "g, keluarkan");
-    setError("RESIDUE_DETECTED", "Sisa " + String(leftover,0) + "g di batch terakhir");
-    spinnerCWPWM(SPINNER_PWM_MAX);
-    unsigned long extraStart = millis();
-    while (millis() - extraStart < 4000) { maintainNetwork(); delay(20); }
-    spinnerStop();
+  // ---- Batch TERAKHIR: verifikasi ekstra sampai bener2 kosong, gak ada
+  // batch berikutnya yang bakal ngecek sisa (RESIDUE_DETECTED cuma jalan
+  // di AWAL batch berikutnya). Ulangi buka-tutup+spinner sampai turun ke
+  // toleransi FINAL_CLEAR_TOLERANCE_G, maks FINAL_CLEAR_MAX_TRIES kali. ----
+  if (batchNo == totalBatches) {
+    int t = 0;
+    while (readChamberInstantGram() > FINAL_CLEAR_TOLERANCE_G && t < FINAL_CLEAR_MAX_TRIES) {
+      float leftover = readChamberInstantGram();
+      lcd.clear(); lcdLine(0,"SISA AKHIR"); lcdLine(1, fmt1(leftover) + "g, coba " + String(t + 1));
+      setError("RESIDUE_DETECTED", "Sisa " + String(leftover,0) + "g di batch terakhir (coba " + String(t + 1) + ")");
+      servoClose(); delay(400);
+      spinnerCWPWM(SPINNER_PWM_MAX);
+      servoOpen();
+      unsigned long extraStart = millis();
+      while (millis() - extraStart < 3000) { maintainNetwork(); delay(20); }
+      spinnerStop();
+      delay(300);
+      t++;
+    }
   }
 
   // ---- TUTUP PINTU + STOP SPINNER ----
