@@ -180,6 +180,7 @@ export const getDashboardSummary = () => req('/dashboard/summary');
 
 // Siklus Budidaya (tebar → panen)
 export const getActiveCycle = (pondId) => req(`/ponds/${pondId}/cycle`);
+export const getHarvestProjection = (pondId) => req(`/ponds/${pondId}/harvest-projection`);
 export const startCycle = (pondId, data) =>
   req(`/ponds/${pondId}/cycle`, { method: 'POST', body: data });
 export const harvestCycle = (pondId, data) =>

@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import {
   getActiveCycle, startCycle, harvestCycle, getCycles, cancelCycle,
-  getHarvestRecords, addPartialHarvest,
+  getHarvestRecords, addPartialHarvest, getHarvestProjection,
 } from '../services/api';
 
 const rupiah = (n) =>
@@ -15,9 +15,10 @@ const fdate = (d) => (d ? new Date(d).toLocaleDateString('id-ID', { day: '2-digi
 const fnum  = (n, dec = 2) => n == null ? '-' : Number(n).toLocaleString('id-ID', { maximumFractionDigits: dec });
 
 export default function CycleTab({ pondId, onChange }) {
-  const [cycle,    setCycle]    = useState(null);
-  const [cycles,   setCycles]   = useState([]);
-  const [harvests, setHarvests] = useState([]);   // panen parsial siklus aktif
+  const [cycle,      setCycle]      = useState(null);
+  const [cycles,     setCycles]     = useState([]);
+  const [harvests,   setHarvests]   = useState([]);   // panen parsial siklus aktif
+  const [projection, setProjection] = useState(null);
   const [loading,  setLoading]  = useState(true);
   const [showStart,   setShowStart]   = useState(false);
   const [showPartial, setShowPartial] = useState(false);
@@ -25,14 +26,16 @@ export default function CycleTab({ pondId, onChange }) {
 
   async function load() {
     try {
-      const [c, hist, hv] = await Promise.all([
+      const [c, hist, hv, proj] = await Promise.all([
         getActiveCycle(pondId),
         getCycles(pondId),
         getHarvestRecords(pondId).catch(() => []),
+        getHarvestProjection(pondId).catch(() => null),
       ]);
       setCycle(c);
       setCycles(hist);
       setHarvests(hv);
+      setProjection(proj);
     } catch (e) { console.error(e); } finally { setLoading(false); }
   }
   useEffect(() => { load(); }, [pondId]);
@@ -163,6 +166,38 @@ export default function CycleTab({ pondId, onChange }) {
             </div>
             {cycle.notes && <div style={{ marginTop: 12, padding: 12, background: 'var(--bg-elevated)', borderRadius: 10, fontSize: 13 }}><strong>Catatan:</strong> {cycle.notes}</div>}
           </div>
+
+          {/* ===== Proyeksi Panen ===== */}
+          {projection && (
+            <div className="card" style={{ marginTop: 16 }}>
+              <div className="card-header"><div className="card-title">Proyeksi Panen</div></div>
+              {projection.predicted_harvest_date == null ? (
+                <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                  Belum cukup data sampling biomassa untuk memproyeksikan tanggal panen — lakukan sampling
+                  minimal 2x di tanggal berbeda.
+                </div>
+              ) : (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 12 }}>
+                    <Info icon={<CalendarClock size={18} />} label="Perkiraan Tanggal Panen" value={fdate(projection.predicted_harvest_date)} />
+                    <Info icon={<Fish size={18} />}          label="Estimasi Jumlah Ikan"     value={`${fnum(projection.projected_fish_count, 0)} ekor`} />
+                    <Info icon={<Scale size={18} />}         label="Estimasi Total Hasil"     value={`${fnum(projection.projected_total_kg)} kg`} />
+                    <Info icon={<Wheat size={18} />}         label="Pakan Terpakai (skrg)"    value={`${fnum(projection.total_feed_kg)} kg`} />
+                    <Info icon={<CircleDollarSign size={18} />} label="Biaya Pakan (skrg)"    value={rupiah(projection.feed_cost_so_far)} />
+                    <Info icon={<CircleDollarSign size={18} />} label="Total Biaya (skrg)"    value={rupiah(projection.total_cost_so_far)} />
+                    <Info icon={<TrendingUp size={18} />}
+                      label="Proyeksi Untung Bersih"
+                      value={projection.projected_profit != null ? rupiah(projection.projected_profit) : 'Isi harga jual dulu'} />
+                  </div>
+                  <div style={{ marginTop: 12, padding: 12, background: 'var(--bg-elevated)', borderRadius: 10, fontSize: 12, color: 'var(--text-secondary)' }}>
+                    Proyeksi berdasarkan laju pertumbuhan LINEAR dari sampling biomassa terakhir — bukan
+                    kurva biologis pasti, akurasi meningkat dengan sampling yang rutin. Biaya pakan ke depan
+                    belum diekstrapolasi (hanya yang sudah benar-benar terpakai sampai sekarang).
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </>
       )}
 

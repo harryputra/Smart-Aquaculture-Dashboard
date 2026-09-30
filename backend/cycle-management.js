@@ -94,6 +94,67 @@ function registerCycleHandlers({ app, pool }) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // ---- Proyeksi panen: tanggal, hasil, pakan, untung (komposisi cycleMetrics) ----
+  app.get('/api/ponds/:pondId/harvest-projection', requirePondAccess('pondId'), async (req, res) => {
+    try {
+      const pondId = req.params.pondId;
+      const cycle = (await pool.query(
+        `SELECT * FROM pond_cycles WHERE pond_id=$1 AND status='active' ORDER BY start_date DESC LIMIT 1`,
+        [pondId])).rows[0];
+      if (!cycle) return res.json(null);
+
+      const m = await cycleMetrics(cycle);
+
+      let predicted_harvest_date = null;
+      if (m.days_to_target != null) {
+        const d = new Date();
+        d.setDate(d.getDate() + m.days_to_target);
+        predicted_harvest_date = d.toISOString().slice(0, 10);
+      }
+      const target_weight_g = cycle.target_weight_g != null ? parseFloat(cycle.target_weight_g) : null;
+      const projected_total_kg = target_weight_g != null ? r2((m.population * target_weight_g) / 1000) : null;
+
+      await ensureFeedStock(pondId);
+      const fs = (await pool.query(`SELECT price_per_kg FROM feed_stock WHERE pond_id=$1`, [pondId])).rows[0];
+      const feedPrice = parseFloat(fs?.price_per_kg) || 0;
+      const feed_cost_so_far = r2(m.total_feed_kg * feedPrice);
+      const fry_cost = parseFloat(cycle.fry_cost_total) || 0;
+      const op_cost_so_far = parseFloat((await pool.query(
+        `SELECT COALESCE(SUM(amount),0) s FROM operational_costs WHERE cycle_id=$1`, [cycle.cycle_id])).rows[0].s) || 0;
+      const total_cost_so_far = r2(fry_cost + feed_cost_so_far + op_cost_so_far);
+
+      const daily_op_cost_rate = m.days > 0 ? op_cost_so_far / m.days : 0;
+      const projected_remaining_op_cost = r2(daily_op_cost_rate * (m.days_to_target || 0));
+
+      const sellPrice = cycle.target_sell_price_per_kg != null ? parseFloat(cycle.target_sell_price_per_kg) : null;
+      const projected_revenue = (sellPrice != null && projected_total_kg != null) ? r2(projected_total_kg * sellPrice) : null;
+      const projected_profit = (projected_revenue != null)
+        ? r2(projected_revenue - (total_cost_so_far + projected_remaining_op_cost))
+        : null;
+
+      res.json({
+        pond_id: pondId,
+        cycle_id: cycle.cycle_id,
+        days: m.days,
+        days_to_target: m.days_to_target,
+        predicted_harvest_date,
+        avg_weight_g: m.avg_weight_g,
+        target_weight_g,
+        projected_fish_count: m.population,
+        projected_total_kg,
+        total_feed_kg: m.total_feed_kg,
+        feed_cost_so_far,
+        fry_cost: r2(fry_cost),
+        op_cost_so_far: r2(op_cost_so_far),
+        total_cost_so_far,
+        projected_remaining_op_cost,
+        sell_price_per_kg: sellPrice,
+        projected_revenue,
+        projected_profit,
+      });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   // ---- Perbandingan antar-kolam (KPI siklus aktif) ----
   app.get('/api/cycles/compare', async (req, res) => {
     try {
